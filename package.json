@@ -1,0 +1,43 @@
+{
+  "name": "clinic-appointment-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "dev": "npm run build:dashboard && tsx --env-file-if-exists=.env apps/agent-api/src/server.ts",
+    "typecheck": "tsc --noEmit && tsc -p apps/dashboard/tsconfig.json",
+    "build": "tsc && npm run build:dashboard",
+    "build:dashboard": "vite build --config apps/dashboard/vite.config.ts",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run build && npm test",
+    "db:migration": "supabase migration new",
+    "demo": "tsx scripts/demo.ts",
+    "smoke": "tsx --env-file-if-exists=.env scripts/smoke-api.ts"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.13",
+    "@fastify/static": "10.1.8",
+    "@js-temporal/polyfill": "0.5.1",
+    "fastify": "5.12.7",
+    "lucide-react": "1.65.0",
+    "pg": "8.23.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "@types/pg": "8.23.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "supabase": "2.122.0",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vite": "8.3.5",
+    "vitest": "5.0.5"
+  }
+}
