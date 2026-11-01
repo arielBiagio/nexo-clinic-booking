@@ -3,7 +3,7 @@
 ## Funciones
 
 - Login del personal con roles de administración, recepción y terapeuta.
-- Administración de accesos, asignación de profesionales y desactivación de cuentas.
+- Alta de terapeutas con su perfil profesional, gestión de roles y desactivación de accesos.
 - Agenda semanal y diaria con filtros, búsqueda y gestión de turnos.
 - Asistente de reservas con lenguaje natural, consulta de disponibilidad y explicaciones con IA.
 - Selección de horarios y confirmación de reservas controladas por el backend.

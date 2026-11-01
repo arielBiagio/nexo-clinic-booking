@@ -96,7 +96,7 @@ export function App({user,accessMode,onLogout}:{user:StaffUser;accessMode:'demo'
           {!readOnly&&<div className="cleanup-toolbar"><button className="removed-link" onClick={()=>setRemovedKind('appointments')}>Ver turnos quitados</button></div>}<div className="workspace-footer"><span><ShieldCheck size={13}/>Espacio de prueba · todos los pacientes son ficticios</span><span>Hecho para cuidar tu tiempo<HeartPulse size={13}/></span></div></>}
           {page==='inbox'&&<Inbox data={data} selected={selectedConversation} onSelect={setSelectedConversation} onRefresh={refresh} notify={setToast} onDelete={id=>remove('conversations',id)} onRemoved={()=>setRemovedKind('conversations')}/>}
           {page==='schedule'&&!readOnly&&<Schedule data={data} onRefresh={refresh} notify={setToast}/>}
-          {page==='team'&&canManageStaff&&<Staff therapists={data.therapists} notify={setToast}/>}
+          {page==='team'&&canManageStaff&&<Staff therapists={data.therapists} notify={setToast} onRefresh={refresh}/>}
         </>}
       </main>
     </div>

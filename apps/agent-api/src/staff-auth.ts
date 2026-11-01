@@ -9,7 +9,7 @@ export type StaffRole='admin'|'reception'|'therapist';
 export interface StaffPrincipal {id:string;email:string;name:string;role:StaffRole;therapistId:string|null}
 declare module 'fastify' { interface FastifyRequest {staff?:StaffPrincipal} }
 const credentials=z.strictObject({email:z.email().max(254),password:z.string().min(1).max(128)});
-const newStaff=credentials.extend({password:z.string().min(12).max(128),name:z.string().trim().min(2).max(70),role:z.enum(['admin','reception','therapist']),therapistId:z.uuid().nullable()});
+const newStaff=credentials.extend({password:z.string().min(12).max(128),name:z.string().trim().min(2).max(70),role:z.enum(['admin','reception','therapist']),specialty:z.string().trim().min(2).max(120).optional()});
 const changeStaff=z.strictObject({role:z.enum(['admin','reception','therapist']),active:z.boolean(),therapistId:z.uuid().nullable()});
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const cookieName='nexo_staff';
@@ -85,14 +85,17 @@ export class StaffAuth {
       return await this.db.transaction(async db=>{
         await db.query('select pg_advisory_xact_lock(82910421)');
         if(initial&&(await db.query('select user_id from public.staff_members limit 1')).rows.length)throw new DomainError('SETUP_ALREADY_COMPLETE',409);
-        await this.validateTherapist(db,input.role,input.therapistId);
         const {data,error}=await this.client(true).auth.admin.createUser({email:input.email,password:input.password,email_confirm:true});
         if(error||!data.user)throw new DomainError('STAFF_CREATION_FAILED',409);
         createdUser=data.user.id;
         await db.query('insert into public.staff_members(user_id,role,display_name,email) values ($1,$2,$3,$4)',[createdUser,input.role,input.name,input.email]);
-        if(input.role==='therapist')await db.query('update public.therapists set staff_user_id=$2 where id=$1',[input.therapistId,createdUser]);
+        let therapistId:string|null=null;
+        if(input.role==='therapist'){
+          const therapist=(await db.query<{id:string}>('insert into public.therapists(name,specialty,staff_user_id) values ($1,$2,$3) returning id',[input.name,input.specialty??'Fisioterapia',createdUser])).rows[0]!;
+          therapistId=therapist.id;
+        }
         await db.query('insert into private.staff_audit(actor_id,subject_id,action) values ($1,$2,$3)',[actorId??createdUser,createdUser,initial?'admin_bootstrapped':'staff_created']);
-        return {id:createdUser};
+        return {id:createdUser,therapistId};
       });
     }catch(error){
       // Compensate only after the SQL transaction rolls back and releases its FK locks.
@@ -108,7 +111,7 @@ export class StaffAuth {
     app.post('/v1/auth/setup',async(request,reply)=>{
       this.rateLimit(request);const input=credentials.extend({password:z.string().min(12).max(128),name:z.string().trim().min(2).max(70)}).parse(request.body);
       if(!this.isLocal||input.email.toLowerCase()!==this.options.bootstrapEmail.toLowerCase())throw new DomainError('SETUP_NOT_ALLOWED',403);
-      await this.createStaff({...input,role:'admin',therapistId:null},undefined,true);
+      await this.createStaff({...input,role:'admin'},undefined,true);
       return this.login(input.email,input.password,reply);
     });
     app.get('/v1/auth/me',request=>({mode:'staff',user:request.staff}));
