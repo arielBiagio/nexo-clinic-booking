@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, SlidersHorizontal, Plus, CalendarDays } from
 import type { Appointment, Dashboard } from './types';
 import { addDays, dateAt, fmtDate, fmtTime, minutesAt } from './api';
 
-export function Calendar({data,onWeek,onBook,onAppointment,filter,onFilter,search}:{data:Dashboard;onWeek:(date:string)=>void;onBook:(date?:string,therapistId?:string,slotId?:string)=>void;onAppointment:(a:Appointment)=>void;filter:string;onFilter:(id:string)=>void;search:string}) {
+export function Calendar({data,onWeek,onBook,onAppointment,filter,onFilter,search,readOnly=false}:{readOnly?:boolean;data:Dashboard;onWeek:(date:string)=>void;onBook:(date?:string,therapistId?:string,slotId?:string)=>void;onAppointment:(a:Appointment)=>void;filter:string;onFilter:(id:string)=>void;search:string}) {
   const [view,setView]=useState<'week'|'day'>('week');
   const [day,setDay]=useState(data.anchorDate);
   const zone=data.clinic.time_zone;
@@ -37,14 +37,14 @@ export function Calendar({data,onWeek,onBook,onAppointment,filter,onFilter,searc
             const free=available.filter(s=>dateAt(s.starts_at,zone)===date);
             const shownDoctors=filter==='all'?data.therapists.map(t=>t.id):[filter];
             return <div className="day-column" key={date} style={{backgroundSize:`100% ${hourHeight}px`}}>
-              {free.map(slot=>{const doctorIndex=shownDoctors.indexOf(slot.therapist_id);return <button key={slot.id} className="open-slot" aria-label={`Reservar ${fmtDate(date)} a las ${fmtTime(slot.starts_at,zone)} con ${data.therapists.find(t=>t.id===slot.therapist_id)?.name}`} title={`Disponible · ${fmtTime(slot.starts_at,zone)}`} onClick={()=>onBook(date,slot.therapist_id,slot.id)} style={{top:(minutesAt(slot.starts_at,zone)-startHour*60)/60*hourHeight,height:Math.max(28,(minutesAt(slot.ends_at,zone)-minutesAt(slot.starts_at,zone))/60*hourHeight-4),left:`calc(${doctorIndex/shownDoctors.length*100}% + 4px)`,width:`calc(${100/shownDoctors.length}% - 8px)`}}><Plus size={12}/><span>{fmtTime(slot.starts_at,zone)}</span></button>;})}
+              {free.map(slot=>{const doctorIndex=shownDoctors.indexOf(slot.therapist_id);return <button key={slot.id} className="open-slot" disabled={readOnly} aria-label={`Reservar ${fmtDate(date)} a las ${fmtTime(slot.starts_at,zone)} con ${data.therapists.find(t=>t.id===slot.therapist_id)?.name}`} title={`Disponible · ${fmtTime(slot.starts_at,zone)}`} onClick={()=>onBook(date,slot.therapist_id,slot.id)} style={{top:(minutesAt(slot.starts_at,zone)-startHour*60)/60*hourHeight,height:Math.max(28,(minutesAt(slot.ends_at,zone)-minutesAt(slot.starts_at,zone))/60*hourHeight-4),left:`calc(${doctorIndex/shownDoctors.length*100}% + 4px)`,width:`calc(${100/shownDoctors.length}% - 8px)`}}><Plus size={12}/><span>{fmtTime(slot.starts_at,zone)}</span></button>;})}
               {dayEvents.map(a=>{const concurrent=dayEvents.some(b=>b.id!==a.id&&Date.parse(b.starts_at)<Date.parse(a.ends_at)&&Date.parse(a.starts_at)<Date.parse(b.ends_at));const lanes=concurrent?shownDoctors.length:1;const doctorIndex=concurrent?shownDoctors.indexOf(a.therapist_id):0;const color=data.therapists.findIndex(t=>t.id===a.therapist_id);return <button key={a.id} className={`appointment doctor-${color}`} onClick={()=>onAppointment(a)} style={{top:(minutesAt(a.starts_at,zone)-startHour*60)/60*hourHeight,height:Math.max(43,(minutesAt(a.ends_at,zone)-minutesAt(a.starts_at,zone))/60*hourHeight-4),left:`calc(${doctorIndex/lanes*100}% + 4px)`,width:`calc(${100/lanes}% - 8px)`}} title={`${a.patient_name} · ${a.therapist_name} · ${fmtTime(a.starts_at,zone)}`}><span className="event-time">{fmtTime(a.starts_at,zone)}</span><strong>{a.patient_name}</strong><span className="event-doctor">{a.therapist_name}</span></button>;})}
             </div>;
           })}
         </div>
-        <div className="calendar-day-footers" style={{gridTemplateColumns:`48px repeat(${days.length},1fr)`}}><span/>{days.map(date=><button key={date} onClick={()=>onBook(date)}><Plus size={12}/>{available.filter(s=>dateAt(s.starts_at,zone)===date).length} libres</button>)}</div>
+        <div className="calendar-day-footers" style={{gridTemplateColumns:`48px repeat(${days.length},1fr)`}}><span/>{days.map(date=><button key={date} disabled={readOnly} onClick={()=>onBook(date)}><Plus size={12}/>{available.filter(s=>dateAt(s.starts_at,zone)===date).length} libres</button>)}</div>
       </div>
     </div>
-    <div className="calendar-legend"><span><i className="legend-booked"/>Turno confirmado</span><span><i className="legend-open"/>Horario disponible</span><span className="legend-hint">Hacé clic en un horario para reservar</span></div>
+    <div className="calendar-legend"><span><i className="legend-booked"/>Turno confirmado</span><span><i className="legend-open"/>Horario disponible</span><span className="legend-hint">{readOnly?'Vista de tu agenda':'Hacé clic en un horario para reservar'}</span></div>
   </section>;
 }

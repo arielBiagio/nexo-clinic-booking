@@ -1,6 +1,16 @@
 import { Temporal } from '@js-temporal/polyfill';
 
 const errors:Record<string,string> = {
+  INVALID_CREDENTIALS:'Correo o contraseña incorrectos.',
+  STAFF_ACCESS_REQUIRED:'Tu cuenta no tiene un acceso activo a esta clínica.',
+  FORBIDDEN:'Tu rol no tiene permiso para realizar esta acción.',
+  LOGIN_RATE_LIMIT:'Hubo demasiados intentos. Esperá unos minutos antes de volver a ingresar.',
+  SETUP_NOT_ALLOWED:'Usá el correo configurado para la administración inicial.',
+  SETUP_ALREADY_COMPLETE:'La cuenta inicial ya fue creada. Ingresá con tu contraseña.',
+  STAFF_CREATION_FAILED:'No pudimos crear el acceso. Revisá el correo y los requisitos de contraseña; puede que esa cuenta ya exista.',
+  LAST_ADMIN_REQUIRED:'La clínica necesita al menos un administrador activo.',
+  THERAPIST_REQUIRED:'Elegí el profesional que corresponde a esta cuenta.',
+  THERAPIST_ALREADY_LINKED:'Ese profesional ya está asociado a otra cuenta.',
   SLOT_UNAVAILABLE:'Ese turno acaba de ocuparse. Elegí otro horario.',
   CONFIRMATION_REQUIRED:'La selección venció. Elegí el horario nuevamente.',
   AGENT_PAUSED:'Recepción está atendiendo esta conversación.',
@@ -21,7 +31,10 @@ export async function api<T>(path:string, body?:unknown, method?:string, headers
       headers:{...(body !== undefined ? {'Content-Type':'application/json'} : {}),...headers},...(body !== undefined ? {body:JSON.stringify(body)} : {}),signal:AbortSignal.timeout(20_000)});
   } catch { throw new Error('No pudimos conectar con la demo. Comprobá que el servidor esté encendido.'); }
   const value = await response.json();
-  if (!response.ok) throw new Error(errors[value.error] ?? 'No pudimos completar la acción. Volvé a intentar.');
+  if (!response.ok) {
+    if(!path.startsWith('/auth/')&&(response.status===401||value.error==='STAFF_ACCESS_REQUIRED'))window.dispatchEvent(new Event('nexo-auth-required'));
+    throw new Error(errors[value.error] ?? 'No pudimos completar la acción. Volvé a intentar.');
+  }
   return value as T;
 }
 export const dateAt = (instant:string,zone:string) => Temporal.Instant.from(instant).toZonedDateTimeISO(zone).toPlainDate().toString();

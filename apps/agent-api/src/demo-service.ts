@@ -313,19 +313,19 @@ export class DemoService {
     });
   }
 
-  async dashboard(fromDate?: string) {
+  async dashboard(fromDate?: string,therapistId?:string) {
     const clinic = (await this.repository.db.query('select name,time_zone from public.clinics')).rows[0]!;
     let anchor = Temporal.Now.plainDateISO(String(clinic.time_zone)).add({ days: 1 });
     while (anchor.dayOfWeek > 5) anchor = anchor.add({ days: 1 });
     const start = fromDate ? Temporal.PlainDate.from(fromDate) : anchor.subtract({ days: anchor.dayOfWeek - 1 });
     const from = start.toZonedDateTime(String(clinic.time_zone)).toInstant().toString();
     const to = start.add({ days: 7 }).toZonedDateTime(String(clinic.time_zone)).toInstant().toString();
-    const therapists = await this.repository.getTherapists();
+    const therapists = (await this.repository.getTherapists()).filter(t=>!therapistId||t.id===therapistId);
     const appointments = (await this.repository.db.query(`select a.id,a.starts_at,a.ends_at,a.therapist_id,a.conversation_id,p.name as patient_name,t.name as therapist_name
       from public.appointments a join public.patients p on p.id=a.patient_id join public.therapists t on t.id=a.therapist_id
-      where a.status='confirmed' and a.starts_at >= $1 and a.starts_at < $2 order by a.starts_at`, [from,to])).rows;
+      where a.status='confirmed' and a.starts_at >= $1 and a.starts_at < $2 and ($3::uuid is null or a.therapist_id=$3) order by a.starts_at`, [from,to,therapistId??null])).rows;
     const slots = (await Promise.all(therapists.map(t => this.repository.getAvailability(String(t.id),from,to)))).flat();
-    const conversations = (await this.repository.db.query(`select c.id,c.status,c.created_at,p.name as patient_name,p.intake_summary,h.id as handoff_id,h.reason,h.created_at as handoff_at
+    const conversations = therapistId?[]:(await this.repository.db.query(`select c.id,c.status,c.created_at,p.name as patient_name,p.intake_summary,h.id as handoff_id,h.reason,h.created_at as handoff_at
       from public.conversations c join public.patient_identities i on i.id=c.identity_id join public.patients p on p.id=i.patient_id
       left join public.handoffs h on h.conversation_id=c.id and h.resolved_at is null
       where c.archived_at is null order by h.created_at desc nulls last,c.created_at desc limit 100`)).rows.map(row => ({ ...row,id:String(row.id),

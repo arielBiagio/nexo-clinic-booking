@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { ClinicRepository, DomainError } from '../../../packages/db/src/repository.js';
 import type { DemoService } from './demo-service.js';
 import { patientDetailsInput } from '../../../packages/core/src/patient.js';
+import type { StaffAuth } from './staff-auth.js';
 
 const id = z.uuid();
 const selection = z.strictObject({ slotId: id });
@@ -13,9 +14,9 @@ const query = z.strictObject({ therapistId: id, from: z.iso.datetime({ offset: t
 const handoff = z.strictObject({ reason: z.enum(['requested_human', 'not_understood', 'clinical', 'billing', 'exception', 'tool_failure']) });
 const digest = (value: string) => createHash('sha256').update(value).digest();
 
-/** Local operator-only harness. Supabase staff sessions and patient adapters are later milestones. */
-export function buildApp(repository: ClinicRepository, token: string, options: { dashboardDirectory?: string; demo?: DemoService } = {}) {
-  if (token.length < 32) throw new Error('DEMO_API_TOKEN must contain at least 32 characters');
+/** Staff sessions are verified before every API request; demo cookies exist only without StaffAuth. */
+export function buildApp(repository: ClinicRepository, token: string, options: { dashboardDirectory?: string; demo?: DemoService;auth?:StaffAuth } = {}) {
+  if (!options.auth&&token.length < 32) throw new Error('DEMO_API_TOKEN must contain at least 32 characters');
   const app = Fastify({ logger: false, bodyLimit: 16_384, requestTimeout: 10_000 });
   const localSession = randomBytes(32).toString('base64url');
   app.addHook('onRequest', async (request, reply) => {
@@ -26,11 +27,25 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
     const host = request.headers.host ?? '';
     const localHost = /^(127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/.test(host);
     if (options.dashboardDirectory && (pathname === '/' || pathname?.startsWith('/assets/'))) {
-      if (!localHost) return reply.code(403).send({ error: 'LOCAL_HOST_REQUIRED' });
+      if (options.auth?host!==options.auth.origin.host:!localHost) return reply.code(403).send({ error: 'HOST_NOT_ALLOWED' });
       reply.header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'");
-      if (pathname === '/') reply.header('Set-Cookie', `nexo_demo=${localSession}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800`);
+      if (pathname === '/'&&!options.auth) reply.header('Set-Cookie', `nexo_demo=${localSession}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800`);
       return;
     }
+    if(options.auth){
+      if(host!==options.auth.origin.host)throw new DomainError('HOST_NOT_ALLOWED',403);
+      options.auth.assertOrigin(request);
+      if(['/v1/auth/status','/v1/auth/login','/v1/auth/setup','/v1/auth/logout'].includes(pathname??''))return;
+      request.staff=await options.auth.authenticate(request);
+      if(pathname?.startsWith('/v1/staff')&&request.staff.role!=='admin')throw new DomainError('FORBIDDEN',403);
+      if(request.staff.role==='therapist'){
+        const own=request.staff.therapistId;
+        const allowed=request.method==='GET'&&(['/v1/auth/me','/v1/dashboard','/v1/therapists'].includes(pathname??'')||pathname===`/v1/therapists/${own}/schedule`||pathname==='/v1/availability'&&new URL(request.url,'http://local').searchParams.get('therapistId')===own);
+        if(!allowed)throw new DomainError('FORBIDDEN',403);
+      }
+      return;
+    }
+    if(pathname==='/v1/auth/status'||pathname==='/v1/auth/me')return;
     const authorization = request.headers.authorization ?? '';
     if (timingSafeEqual(digest(authorization), digest(`Bearer ${token}`))) return;
     const cookie = request.headers.cookie?.split(';').map(value=>value.trim()).find(value=>value.startsWith('nexo_demo='))?.slice('nexo_demo='.length) ?? '';
@@ -48,8 +63,13 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
     // Do not expose SQL, patient input, credentials, or stack traces.
     return reply.code(500).send({ error: 'INTERNAL_ERROR' });
   });
-  app.get('/health', async () => ({ status: 'ok', mode: 'synthetic-local-demo' }));
-  app.get('/v1/therapists', () => repository.getTherapists());
+  app.get('/health', async () => ({ status: 'ok', mode: options.auth?'staff':'synthetic-local-demo' }));
+  if(options.auth)options.auth.register(app);
+  else{
+    app.get('/v1/auth/status',async()=>({mode:'demo',setupRequired:false}));
+    app.get('/v1/auth/me',async()=>({mode:'demo',user:{id:'local',name:'Admin',email:'',role:'admin',therapistId:null}}));
+  }
+  app.get('/v1/therapists', async request => (await repository.getTherapists()).filter(t=>request.staff?.role!=='therapist'||t.id===request.staff.therapistId));
   app.get('/v1/conversations', () => repository.getConversations());
   app.get('/v1/conversations/:id/patient',request=>repository.getPatientDetails(id.parse((request.params as {id:string}).id)));
   app.patch('/v1/conversations/:id/patient',request=>repository.updatePatientDetails(id.parse((request.params as {id:string}).id),patientDetailsInput.parse(request.body)));
@@ -82,7 +102,7 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
     app.get('/v1/demo/removed/:kind',request=>repository.getRemoved(z.enum(['appointments','conversations']).parse((request.params as {kind:string}).kind)));
     app.get('/v1/dashboard', async request => {
       const input = z.strictObject({ fromDate: z.iso.date().optional() }).parse(request.query);
-      return demo.dashboard(input.fromDate);
+      return demo.dashboard(input.fromDate,request.staff?.role==='therapist'?request.staff.therapistId??undefined:undefined);
     });
     app.get('/v1/therapists/:id/schedule', request => repository.getSchedule(id.parse((request.params as {id:string}).id)));
     const rest = z.strictObject({ startMinute:z.number().int().min(0).max(1439),endMinute:z.number().int().min(1).max(1440) });

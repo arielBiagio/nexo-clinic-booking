@@ -1,4 +1,5 @@
 export interface Therapist { id:string; name:string; specialty:string }
+export interface StaffUser {id:string;email:string;name:string;role:'admin'|'reception'|'therapist';therapistId:string|null}
 export interface Slot { id:string; therapist_id:string; starts_at:string; ends_at:string }
 export interface Appointment extends Slot { patient_name:string; therapist_name:string; conversation_id:string }
 export interface Conversation { id:string; status:string; patient_name:string; handoff_id:string|null; reason:string|null; preview:string; messageCount:number; created_at:string }
