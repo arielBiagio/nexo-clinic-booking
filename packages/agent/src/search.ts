@@ -7,6 +7,22 @@ type Therapist={id:string;name:string;specialty:string};
 const freshSearch=/\b(quiero|quisiera|necesito|busco|buscar|reservar|sacar|gustaria|turnos?|citas?|fisio|fisioterapia|kinesiologia)\b/;
 const refinement=(value:string)=>!freshSearch.test(value)&&/\b(hoy|manana|lunes|martes|miercoles|jueves|viernes|sabado|domingo|semana|la tarde|la noche)\b/.test(value);
 const anyTherapist=/\b(cualquier(?:a)?|cualquiera de los|me da igual|sin preferencia|todos los|no importa (?:el|quien))\b/;
+/** Resolve only complete, unqualified ordinal choices against the actual offered list. */
+export function offeredSelection(text:string,offered:readonly {id:string}[]):string|null {
+  const value=normalized(text).replace(/[¿?¡!.,;:]+/g,' ').replace(/\s+/g,' ').trim();
+  const choice=value.match(/^(?:(?:prefiero|elijo|quiero|selecciono|me sirve|me quedo con)\s+)?(?:el|la)\s+(primer[oa]?|segund[oa]|tercer[oa]?|ultim[oa])(?:\s+(?:horario|turno|opcion))?(?:\s+(?:me sirve|me queda bien|me va bien|esta bien|por favor))?$/)?.[1];
+  if(!choice)return null;
+  const index=choice.startsWith('primer')?0:choice.startsWith('segund')?1:choice.startsWith('tercer')?2:offered.length-1;
+  return offered[index]?.id??null;
+}
+/** Reject an appointment choice, not unrelated negative intake such as "no tengo seguro". */
+export function rejectsSelectedSlot(text:string):boolean {
+  const value=normalized(text).replace(/[¿?¡!.,;:]+/g,' ').replace(/\s+/g,' ').trim();
+  if(/^(?:no|no gracias|mejor no|prefiero no|no confirmo|no lo confirmo|no confirmes|no lo confirmes|no me sirve|no me conviene)$/.test(value))return true;
+  if(/^(?:no )?(?:otro (?:horario|turno|dia)|otra (?:fecha|hora))\b|^(?:mejor|prefiero|quiero|busquemos|busca|mostrame) (?:otro (?:horario|turno|dia)|otra (?:fecha|hora))\b/.test(value))return true;
+  return /\b(?:horario|turno|fecha|hora|dia|primero|primera|segundo|segunda|tercero|tercera|ultimo|ultima)\b.{0,60}\bno (?:me )?(?:sirve|conviene|queda bien|va bien|gusta)\b/.test(value)
+    || /^(?:ese|esa|este|esta) no (?:me )?(?:sirve|conviene|gusta)$/.test(value);
+}
 /** Explicit single clock times, with optional meridiem/daypart; ranges stay with the interpreter. */
 export function requestedLocalTime(text:string):string|null {
   const value=normalized(text);

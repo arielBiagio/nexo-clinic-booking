@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Temporal } from '@js-temporal/polyfill';
 import { ClinicRepository, DomainError } from '../../../packages/db/src/repository.js';
 import { isExplicitConfirmation, ProviderError, type AvailabilityInput, type IntentModel, type OfferedSlot } from '../../../packages/agent/src/openrouter.js';
-import { normalizeAvailabilitySearch, requestedLocalTime } from '../../../packages/agent/src/search.js';
+import { normalizeAvailabilitySearch, requestedLocalTime, offeredSelection, rejectsSelectedSlot } from '../../../packages/agent/src/search.js';
 import { renderNarration, type NarrationContext } from '../../../packages/agent/src/narration.js';
 import { groundedPatientPatch, missingContact } from '../../../packages/core/src/patient.js';
 
@@ -88,7 +88,7 @@ export class DemoService {
         return this.get(id);
       }
       // A rejected selection must not survive a later ambiguous "sí".
-      if(session.selected&&input.text&&/^(no\b|otro horario\b|otra fecha\b|otra hora\b)/i.test(input.text.trim())){
+      if(session.selected&&input.text&&rejectsSelectedSlot(input.text)){
         session.selected=null;
         await this.repository.db.query("update public.conversations set pending_slot_id=null,pending_expires_at=null where id=$1 and status='active'",[id]);
         session.choices=[{label:'Buscar otros horarios',action:'start'}];
@@ -96,7 +96,9 @@ export class DemoService {
       let filter:AvailabilityInput|null=input.action==='more'&&session.search?{...session.search,date:null,horizon_days:14}:null;
       let selectedSlot=input.slotId;
       let reason='requested_human';
-      if(this.intentModel&&input.text&&!input.action){
+      const ordinal=input.text&&!input.action?offeredSelection(input.text,session.offered):null;
+      if(ordinal){action='select';selectedSlot=ordinal;}
+      if(this.intentModel&&input.text&&!input.action&&!ordinal){
         if(session.selected&&isExplicitConfirmation(input.text))action='confirm';
         else {
           try{
