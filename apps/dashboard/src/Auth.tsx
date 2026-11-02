@@ -25,7 +25,7 @@ export function AuthGate(){
   };
   const logout=async()=>{setBusy(true);setError('');try{await api('/auth/logout',{});setUser(null);sessionStorage.removeItem('nexo-demo-chat');}catch(e){setError((e as Error).message);}finally{setBusy(false);}};
   if(loading)return <main className="auth-screen"><p>Cargando Nexo…</p></main>;
-  if(user)return <App user={user} accessMode={mode} onLogout={()=>void logout()}/>;
+  if(user)return <App user={user} accessMode={mode} onLogout={()=>void logout()} onUserChanged={()=>{void api<{user:StaffUser}>('/auth/me').then(session=>setUser(session.user)).catch(()=>setUser(null));}}/>;
   return <main className="auth-screen"><section className="auth-card panel">
     <a href="#" className="brand"><span className="brand-mark"><span/><span/><span/></span><span>nexo<span className="brand-dot">.</span></span></a>
     <span className="auth-icon"><HeartPulse size={25}/></span>

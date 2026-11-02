@@ -3,7 +3,7 @@ import { CalendarDays, Check, Clock3, ShieldCheck } from 'lucide-react';
 import { api, addDays, dayInstant, fmtDate, fmtTime } from './api';
 import type { Dashboard, Slot } from './types';
 
-export function Booking({data,initialDate,initialTherapist,initialSlot,onDone,notify}:{data:Dashboard;initialDate?:string;initialTherapist?:string;initialSlot?:string;onDone:()=>void;notify:(s:string)=>void}) {
+export function Booking({data,initialDate,initialTherapist,initialSlot,ownTherapistId,onDone,notify}:{data:Dashboard;initialDate?:string;initialTherapist?:string;initialSlot?:string;ownTherapistId?:string|undefined;onDone:()=>void;notify:(s:string)=>void}) {
   const [name,setName]=useState('');
   const [phone,setPhone]=useState('');
   const [therapist,setTherapist]=useState(initialTherapist??data.therapists[0]!.id);
@@ -11,6 +11,7 @@ export function Booking({data,initialDate,initialTherapist,initialSlot,onDone,no
   const [slots,setSlots]=useState<Slot[]>([]),[selected,setSelected]=useState<Slot|null>(null);
   const [busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[error,setError]=useState('');
   const conversation=useRef<string|null>(null);
+  const requestId=useRef(crypto.randomUUID());
   const zone=data.clinic.time_zone;
   useEffect(()=>{let active=true;setLoading(true);setSelected(null);setError('');
     const params=new URLSearchParams({therapistId:therapist,from:dayInstant(date,zone),to:dayInstant(addDays(date,1),zone)});
@@ -20,6 +21,10 @@ export function Booking({data,initialDate,initialTherapist,initialSlot,onDone,no
   const save=async()=>{
     if(!selected||!name.trim()||!phone.trim())return;setBusy(true);setError('');
     try{
+      if(ownTherapistId){
+        await api(`/therapists/${ownTherapistId}/appointments`,{slotId:selected.id,confirmed:true,name:name.trim(),phone:phone.trim()},'POST',{'Idempotency-Key':requestId.current});
+        notify('Turno reservado. Ya aparece en tu agenda.');onDone();return;
+      }
       if(!conversation.current)conversation.current=(await api<{id:string}>('/demo/conversations',{name:name.trim()})).id;
       await api(`/conversations/${conversation.current}/patient`,{name:name.trim(),phone:phone.trim()},'PATCH');
       await api(`/conversations/${conversation.current}/selection`,{slotId:selected.id});

@@ -1,4 +1,5 @@
 import { Temporal } from '@js-temporal/polyfill';
+import { randomUUID } from 'node:crypto';
 import { generateSlots, type WorkingRule } from '../../core/src/availability.js';
 import type { Sql } from './client.js';
 import { patientDetailsInput, patientSummary, type PatientDetails, type PatientPatch } from '../../core/src/patient.js';
@@ -52,14 +53,61 @@ export class ClinicRepository {
     return (await this.db.query('select id, name, specialty from public.therapists order by name')).rows;
   }
 
+  async getTherapistProfile(therapistId:string){
+    const row=(await this.db.query('select id,name,specialty from public.therapists where id=$1',[therapistId])).rows[0];
+    if(!row)throw new DomainError('THERAPIST_NOT_FOUND',404);return row;
+  }
+
+  async updateTherapistProfile(therapistId:string,input:{name:string;specialty:string},actor?:{id:string;role:string}){
+    return this.db.transaction(async db=>{
+      const row=(await db.query<{staff_user_id:string|null}>('select staff_user_id from public.therapists where id=$1 for update',[therapistId])).rows[0];
+      if(!row)throw new DomainError('THERAPIST_NOT_FOUND',404);
+      if(actor?.role==='therapist'&&row.staff_user_id!==actor.id)throw new DomainError('FORBIDDEN',403);
+      await db.query('update public.therapists set name=$2,specialty=$3 where id=$1',[therapistId,input.name,input.specialty]);
+      if(row.staff_user_id){
+        await db.query('update public.staff_members set display_name=$2 where user_id=$1',[row.staff_user_id,input.name]);
+        await db.query("insert into private.staff_audit(actor_id,subject_id,action) values ($1,$2,'staff_updated')",[actor?.id??row.staff_user_id,row.staff_user_id]);
+      }
+      return {id:therapistId,...input};
+    });
+  }
+
+  /** One confirmed manual booking, including contact and retry identity, in one transaction. */
+  async createManualAppointment(therapistId:string,input:{slotId:string;name:string;phone:string},requestId:string,actor?:{id:string;role:string}){
+    const patient=patientDetailsInput.parse({name:input.name,phone:input.phone});
+    const {name,phone}=patient;
+    if(!name||!phone)throw new DomainError('PATIENT_DETAILS_REQUIRED',400);
+    const key=`staff-${actor?.id??'local'}-${requestId}`;
+    try{return await this.db.transaction(async db=>{
+      await db.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
+      const prior=(await db.query(`select a.*,p.name as saved_name,p.phone as saved_phone from public.appointments a
+        join public.patients p on p.id=a.patient_id where a.request_key=$1`,[key])).rows[0];
+      if(prior){
+        if(prior.therapist_id!==therapistId||prior.slot_id!==input.slotId||prior.saved_name!==name||prior.saved_phone!==phone||prior.status!=='confirmed')throw new DomainError('IDEMPOTENCY_CONFLICT',409);
+        const {saved_name:_name,saved_phone:_phone,...booked}=prior;return booked;
+      }
+      const therapist=(await db.query<{staff_user_id:string|null}>('select staff_user_id from public.therapists where id=$1 for update',[therapistId])).rows[0];
+      if(!therapist)throw new DomainError('THERAPIST_NOT_FOUND',404);
+      if(actor?.role==='therapist'&&therapist.staff_user_id!==actor.id)throw new DomainError('FORBIDDEN',403);
+      if(!(await db.query('select id from public.slots where id=$1 and therapist_id=$2 and active and starts_at>now()',[input.slotId,therapistId])).rows.length)throw new DomainError('SLOT_UNAVAILABLE',409);
+      const patientId=randomUUID(),identity=randomUUID(),conversation=randomUUID();
+      const summary=patientSummary({name,name_collected:true,phone,insurance:null,reported_reason:null,additional_info:null,intake_summary:'',details_updated_at:null});
+      await db.query('insert into public.patients(id,name,name_collected,phone,intake_summary,details_updated_at) values ($1,$2,true,$3,$4,now())',[patientId,name,phone,summary]);
+      await db.query("insert into public.patient_identities(id,patient_id,channel,external_user_id) values ($1,$2,'telegram',$3)",[identity,patientId,`manual-${identity}`]);
+      await db.query("insert into public.conversations(id,identity_id,pending_slot_id,pending_expires_at) values ($1,$2,$3,now()+interval '10 minutes')",[conversation,identity,input.slotId]);
+      return (await db.query('select * from private.book_slot($1,$2,$3,true)',[conversation,input.slotId,key])).rows[0]!;
+    });}catch(error){return translateDatabaseError(error);}
+  }
+
   async getConversations() {
     return (await this.db.query('select id, status, pending_slot_id from public.conversations where archived_at is null order by created_at')).rows;
   }
 
-  async setAppointmentRemoved(appointmentId:string,removed:boolean) {
+  async setAppointmentRemoved(appointmentId:string,removed:boolean,therapistScope?:string) {
     try{return await this.db.transaction(async db=>{
       const meta=(await db.query('select conversation_id,therapist_id from public.appointments where id=$1',[appointmentId])).rows[0];
       if(!meta)throw new DomainError('APPOINTMENT_NOT_FOUND',404);
+      if(therapistScope&&meta.therapist_id!==therapistScope)throw new DomainError('FORBIDDEN',403);
       // Match booking lock order: conversation, therapist, then individual record.
       await db.query('select id from public.conversations where id=$1 for update',[meta.conversation_id]);
       await db.query('select id from public.therapists where id=$1 for update',[meta.therapist_id]);
@@ -95,9 +143,9 @@ export class ClinicRepository {
     });
   }
 
-  async getRemoved(kind:'appointments'|'conversations') {
+  async getRemoved(kind:'appointments'|'conversations',therapistScope?:string) {
     if(kind==='appointments')return (await this.db.query(`select a.id,p.name as label,a.starts_at as at from public.appointments a
-      join public.patients p on p.id=a.patient_id where a.status='cancelled' order by a.starts_at desc limit 100`)).rows;
+      join public.patients p on p.id=a.patient_id where a.status='cancelled' and ($1::uuid is null or a.therapist_id=$1) order by a.starts_at desc limit 100`,[therapistScope??null])).rows;
     return (await this.db.query(`select c.id,p.name as label,c.archived_at as at from public.conversations c
       join public.patient_identities i on i.id=c.identity_id join public.patients p on p.id=i.patient_id
       where c.archived_at is not null order by c.archived_at desc limit 100`)).rows;
@@ -191,7 +239,7 @@ export class ClinicRepository {
   async removeTimeOff(therapistId: string, blockId: string) {
     return this.db.transaction(async db => {
       if (!(await db.query('select id from public.therapists where id=$1 for update',[therapistId])).rows.length) throw new DomainError('THERAPIST_NOT_FOUND',404);
-      await db.query('delete from public.time_off where id=$1 and therapist_id=$2',[blockId,therapistId]);
+      if(!(await db.query('delete from public.time_off where id=$1 and therapist_id=$2 returning id',[blockId,therapistId])).rows.length)throw new DomainError('TIME_OFF_NOT_FOUND',404);
       const clinic=(await db.query<{time_zone:string}>('select time_zone from public.clinics')).rows[0]!;
       return this.regenerate(therapistId,Temporal.Now.plainDateISO(clinic.time_zone).toString(),42,new Date().toISOString(),db);
     });

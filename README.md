@@ -4,6 +4,7 @@
 
 - Login del personal con roles de administración, recepción y terapeuta.
 - Alta de terapeutas con su perfil profesional, gestión de roles y desactivación de accesos.
+- Terapeutas: edición de su perfil y disponibilidad, creación y cancelación de reservas de su propia agenda.
 - Agenda semanal y diaria con filtros, búsqueda y gestión de turnos.
 - Asistente de reservas con lenguaje natural, consulta de disponibilidad y explicaciones con IA.
 - Selección de horarios y confirmación de reservas controladas por el backend.
