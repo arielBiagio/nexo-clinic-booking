@@ -1,21 +1,75 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Temporal } from '@js-temporal/polyfill';
 import { ClinicRepository, DomainError } from '../../../packages/db/src/repository.js';
+import { withSavepoints } from '../../../packages/db/src/savepoints.js';
 import { isExplicitConfirmation, ProviderError, type AvailabilityInput, type IntentModel, type OfferedSlot } from '../../../packages/agent/src/openrouter.js';
 import { normalizeAvailabilitySearch, requestedLocalTime, offeredSelection, rejectsSelectedSlot } from '../../../packages/agent/src/search.js';
 import { renderNarration, type NarrationContext } from '../../../packages/agent/src/narration.js';
-import { groundedPatientPatch, missingContact } from '../../../packages/core/src/patient.js';
+import { groundedPatientPatch, missingContact, type PatientDetails } from '../../../packages/core/src/patient.js';
 
 export interface DemoMessage { id: string; role: 'patient' | 'assistant' | 'staff'; text: string; at: string }
 export interface DemoChoice { label: string; action: 'start' | 'more' | 'select' | 'confirm' | 'human'; slotId?: string }
+export interface ChatView {id:string;status:string;name:string;messages:DemoMessage[];choices:DemoChoice[];patient:PatientDetails;hasAppointment:boolean;ai:{provider:string;model:string|null;error:string|null}}
 interface Session { messages: DemoMessage[]; choices: DemoChoice[]; selected: string | null; processed: Set<string>; offered:OfferedSlot[]; modelRequests:number; clarificationCount:number; providerError:string|null;search:AvailabilityInput|null }
+type StoredSession = Omit<Session,'messages'|'selected'|'processed'> & {processed:string[]; inputs:[string,string][]};
 export interface ChatInput { messageId: string; text?: string | undefined; action?: 'start' | 'more' | 'select' | 'confirm' | 'human' | undefined; slotId?: string | undefined }
 
 export class DemoService {
   readonly sessions = new Map<string, Session>();
   // Serialize actions within a conversation while PostgreSQL protects bookings across conversations.
   private readonly queues = new Map<string, Promise<unknown>>();
-  constructor(readonly repository: ClinicRepository, private readonly intentModel?:IntentModel) {}
+  private readonly inputs = new Map<string,string>();
+  constructor(readonly repository: ClinicRepository, private readonly intentModel?:IntentModel, private readonly scoped=false) {}
+
+  private async loadSession(id:string,pending:string|null) {
+    const stored=(await this.repository.db.query<{state:StoredSession}>('select state from private.conversation_runtime where conversation_id=$1',[id])).rows[0]?.state;
+    const messages=(await this.repository.db.query<{id:string;role:DemoMessage['role'];body:string;created_at:Date|string}>(
+      'select id,role,body,created_at from public.messages where conversation_id=$1 and body is not null order by sequence',[id])).rows.map(row=>({id:row.id,role:row.role,text:row.body,at:new Date(row.created_at).toISOString()}));
+    const session:Session={messages,choices:stored?.choices??[{label:'Buscar horarios',action:'start'},{label:'Hablar con recepción',action:'human'}],
+      selected:pending,processed:new Set(stored?.processed??[]),offered:stored?.offered??[],modelRequests:stored?.modelRequests??0,
+      clarificationCount:stored?.clarificationCount??0,providerError:stored?.providerError??null,search:stored?.search??null};
+    for(const [key,value] of stored?.inputs??[])this.inputs.set(key,value);
+    this.sessions.set(id,session);
+    return session;
+  }
+
+  private async saveSession(id:string,session:Session) {
+    // Insert only new messages. Sequence preserves order even when timestamps are identical.
+    const known=new Set((await this.repository.db.query<{id:string}>('select id from public.messages where conversation_id=$1',[id])).rows.map(row=>row.id));
+    const fresh=session.messages.filter(message=>!known.has(message.id));
+    if(fresh.length)await this.repository.db.query(`insert into public.messages(id,conversation_id,external_message_id,direction,role,body,created_at)
+      select (item->>'id')::uuid,$1,item->>'id',case when item->>'role'='patient' then 'inbound' else 'outbound' end,
+        item->>'role',item->>'text',(item->>'at')::timestamptz
+      from jsonb_array_elements($2::jsonb) with ordinality as entries(item,position) order by position`,[id,JSON.stringify(fresh)]);
+    const {messages,selected,processed,...state}=session;
+    await this.repository.db.query(`insert into private.conversation_runtime(conversation_id,state) values ($1,$2::jsonb)
+      on conflict(conversation_id) do update set state=excluded.state,updated_at=now()`,[id,JSON.stringify({...state,processed:[...processed],inputs:[...this.inputs]})]);
+  }
+
+  private async stored<T>(id:string,operation:(service:DemoService)=>Promise<T>,input?:{key:string;payload:unknown}) {
+    return this.serial(id,async()=>{
+      let snapshot:Session|undefined;
+      const result=await this.repository.db.transaction(async db=>{
+        // A database lock serializes retries and staff/patient actions across server instances.
+        const row=(await db.query<{pending:string|null}>(`select case when pending_expires_at>now() and status='active' then pending_slot_id end as pending
+          from public.conversations where id=$1 for update`,[id])).rows[0];
+        if(!row)throw new DomainError('CONVERSATION_NOT_FOUND',404);
+        const service=new DemoService(new ClinicRepository(withSavepoints(db)),this.intentModel,true);
+        snapshot=await service.loadSession(id,row.pending);
+        if(input){
+          const payload=createHash('sha256').update(JSON.stringify(input.payload)).digest('hex'),previous=service.inputs.get(input.key);
+          if(previous&&previous!==payload)throw new DomainError('IDEMPOTENCY_CONFLICT',409);
+          service.inputs.set(input.key,payload);
+        }
+        const value=await operation(service);
+        await service.saveSession(id,snapshot);
+        return value;
+      });
+      // This map is a compatibility snapshot, never the source of truth after a restart.
+      if(snapshot)this.sessions.set(id,snapshot);
+      return result;
+    });
+  }
 
   private add(session: Session, role: DemoMessage['role'], text: string) {
     session.messages.push({ id: randomUUID(), role, text, at: new Date().toISOString() });
@@ -46,14 +100,17 @@ export class DemoService {
       await db.query('insert into public.patients(id,name,name_collected) values ($1,$2,$3)', [patient, name,name!=='Paciente de prueba']);
       await db.query("insert into public.patient_identities(id,patient_id,channel,external_user_id) values ($1,$2,'telegram',$3)", [identity, patient, `demo-${identity}`]);
       await db.query('insert into public.conversations(id,identity_id) values ($1,$2)', [conversation,identity]);
+      const service=new DemoService(new ClinicRepository(withSavepoints(db)),this.intentModel,true);
+      const session=await service.loadSession(conversation,null);
+      session.choices=[{ label: 'Quiero reservar un turno', action: 'start' }, { label: 'Hablar con recepción', action: 'human' }];
+      service.add(session,'assistant','¡Hola! Soy el asistente de Clínica Demo. Te ayudo a encontrar un turno. ¿Qué te gustaría hacer?');
+      await service.saveSession(conversation,session);
     });
-    const session: Session = { messages: [], choices: [{ label: 'Quiero reservar un turno', action: 'start' }, { label: 'Hablar con recepción', action: 'human' }], selected: null, processed: new Set(),offered:[],modelRequests:0,clarificationCount:0,providerError:null,search:null };
-    this.add(session, 'assistant', '¡Hola! Soy el asistente de Clínica Demo. Te ayudo a encontrar un turno. ¿Qué te gustaría hacer?');
-    this.sessions.set(conversation, session);
     return this.get(conversation);
   }
 
-  async get(id: string) {
+  async get(id: string):Promise<ChatView> {
+    if(!this.scoped)return this.stored(id,service=>service.get(id));
     const row = (await this.repository.db.query(`select c.id,c.status,p.name,
       case when c.pending_expires_at>now() then c.pending_slot_id end as pending_slot_id,
       exists(select 1 from public.appointments a where a.conversation_id=c.id and a.status='confirmed') as has_appointment from public.conversations c
@@ -61,10 +118,10 @@ export class DemoService {
     if (!row) throw new DomainError('CONVERSATION_NOT_FOUND', 404);
     let session = this.sessions.get(id);
     if(!session){
-      session={messages:[],choices:[{label:'Buscar horarios',action:'start'},{label:'Hablar con recepción',action:'human'}],selected:row.pending_slot_id?String(row.pending_slot_id):null,processed:new Set(),offered:[],modelRequests:0,clarificationCount:0,providerError:null,search:null};
-      this.add(session,'assistant','Recuperé tu ficha guardada. Podés actualizar tus datos o continuar con la consulta.');
-      this.sessions.set(id,session);
+      session=await this.loadSession(id,row.pending_slot_id?String(row.pending_slot_id):null);
     }
+    session.selected=row.status==='active'&&row.pending_slot_id?String(row.pending_slot_id):null;
+    if(!session.selected)session.choices=session.choices.filter(choice=>choice.action!=='confirm');
     const patient=await this.repository.getPatientDetails(id);
     if(session.selected&&!missingContact(patient).length&&!session.choices.some(c=>c.action==='confirm'))session.choices.unshift({label:'Confirmar turno',action:'confirm'});
     return { id:String(row.id),status:String(row.status),name:String(row.name),messages: session?.messages ?? [], choices: row.status === 'active' ? session?.choices ?? [] : [],
@@ -72,7 +129,8 @@ export class DemoService {
       ai:{provider:this.intentModel?'openrouter':'guided',model:this.intentModel?.model??null,error:session?.providerError??null} };
   }
 
-  async send(id: string, input: ChatInput) {
+  async send(id: string, input: ChatInput):Promise<ChatView> {
+    if(!this.scoped)return this.stored(id,service=>service.send(id,input),{key:input.messageId,payload:{kind:'patient',text:input.text??null,action:input.action??null,slotId:input.slotId??null}});
     return this.serial(id, async () => {
       const current = await this.get(id);
       const session = this.sessions.get(id);
@@ -81,7 +139,7 @@ export class DemoService {
       if (session.messages.length > 120) throw new DomainError('DEMO_LIMIT_REACHED', 409);
       let action = input.action ?? (/recepci[oó]n|humano|persona|ayuda|factura|dolor|m[eé]dic/i.test(input.text ?? '') ? 'human' : 'start');
       const text = input.text ?? ({ start: 'Quiero reservar un turno',more:'Buscar en los próximos días', select: 'Ese horario me sirve', confirm: 'Sí, confirmo el turno', human: 'Quiero hablar con recepción' }[action]);
-      // Transcript stays in local memory; when enabled, only this conversation's text goes to OpenRouter.
+      // Only this conversation's persisted transcript is supplied to the model.
       this.add(session, 'patient', text);
       if (current.status !== 'active') {
         session.processed.add(input.messageId);
@@ -289,7 +347,8 @@ export class DemoService {
     });
   }
 
-  async reply(id: string, text: string, messageId: string) {
+  async reply(id: string, text: string, messageId: string):Promise<ChatView> {
+    if(!this.scoped)return this.stored(id,service=>service.reply(id,text,messageId),{key:messageId,payload:{kind:'staff',text}});
     return this.serial(id, async () => {
       await this.get(id);
       const session = this.sessions.get(id);
@@ -301,12 +360,14 @@ export class DemoService {
         await db.query("insert into private.audit_events(conversation_id,action,entity_id) values ($1,'staff_replied',$1)", [id]);
       });
       this.add(session, 'staff', text);
+      session.selected=null;session.offered=[];session.choices=[];
       session.processed.add(messageId);
       return this.get(id);
     });
   }
 
-  async archive(id:string,archived:boolean) {
+  async archive(id:string,archived:boolean):Promise<{id:string;archived:boolean}> {
+    if(!this.scoped)return this.stored(id,service=>service.archive(id,archived));
     return this.serial(id,async()=>{
       const result=await this.repository.setConversationArchived(id,archived);
       const session=this.sessions.get(id);
@@ -327,12 +388,15 @@ export class DemoService {
       from public.appointments a join public.patients p on p.id=a.patient_id join public.therapists t on t.id=a.therapist_id
       where a.status='confirmed' and a.starts_at >= $1 and a.starts_at < $2 and ($3::uuid is null or a.therapist_id=$3) order by a.starts_at`, [from,to,therapistId??null])).rows;
     const slots = (await Promise.all(therapists.map(t => this.repository.getAvailability(String(t.id),from,to)))).flat();
-    const conversations = therapistId?[]:(await this.repository.db.query(`select c.id,c.status,c.created_at,p.name as patient_name,p.intake_summary,h.id as handoff_id,h.reason,h.created_at as handoff_at
+    const conversations = therapistId?[]:(await this.repository.db.query(`select c.id,c.status,c.created_at,p.name as patient_name,p.intake_summary,h.id as handoff_id,h.reason,h.created_at as handoff_at,
+      last_message.body as last_message,message_count.total as message_count
       from public.conversations c join public.patient_identities i on i.id=c.identity_id join public.patients p on p.id=i.patient_id
+      left join lateral (select body from public.messages where conversation_id=c.id and body is not null order by sequence desc limit 1) last_message on true
+      left join lateral (select count(*)::int as total from public.messages where conversation_id=c.id and body is not null) message_count on true
       left join public.handoffs h on h.conversation_id=c.id and h.resolved_at is null
       where c.archived_at is null order by h.created_at desc nulls last,c.created_at desc limit 100`)).rows.map(row => ({ ...row,id:String(row.id),
-        preview: this.sessions.get(String(row.id))?.messages.at(-1)?.text ?? (row.intake_summary?'Ficha del paciente guardada':'Conversación de prueba'),
-        messageCount: this.sessions.get(String(row.id))?.messages.length ?? (row.intake_summary||row.handoff_id?1:0),
+        preview: row.last_message ?? (row.intake_summary?'Ficha del paciente guardada':'Conversación'),
+        messageCount: Number(row.message_count??0),
       }));
     return { clinic, therapists, appointments, slots, conversations, weekStart: start.toString(), anchorDate: anchor.toString() };
   }
@@ -357,9 +421,12 @@ export async function populateDashboard(service: DemoService) {
     await repo.updatePatientDetails(conversation.id,{phone:`202555010${i}`});
     await repo.selectSlot(String(conversation.id),String(slot.id));
     await repo.book(String(conversation.id),String(slot.id),`seed-appointment-${i}`,true);
-    const session = service.sessions.get(String(conversation.id))!;
-    session.choices = [{ label:'Hablar con recepción',action:'human' }];
-    session.messages.push({ id:randomUUID(),role:'assistant',text:'Tu turno de prueba está confirmado. ¡Te esperamos!',at:new Date().toISOString() });
+    await repo.db.transaction(async db=>{
+      await db.query(`insert into public.messages(conversation_id,external_message_id,direction,role,body)
+        values ($1,$2,'outbound','assistant','Tu turno de prueba está confirmado. ¡Te esperamos!')`,[conversation.id,randomUUID()]);
+      await db.query(`update private.conversation_runtime set state=jsonb_set(state,'{choices}',$2::jsonb) where conversation_id=$1`,
+        [conversation.id,JSON.stringify([{label:'Hablar con recepción',action:'human'}])]);
+    });
   }
   const human = await service.create('Sofía Morales');
   await service.send(String(human.id),{ messageId:randomUUID(),action:'human',text:'Hola, me gustaría coordinar un horario con recepción.' });

@@ -10,6 +10,7 @@
 - Selección de horarios y confirmación de reservas controladas por el backend.
 - Ficha del paciente con nombre, teléfono, seguro y resumen de información referida.
 - Bandeja de conversaciones, atención humana y reanudación del asistente.
+- Historial de mensajes y contexto de reservas persistentes, con protección contra mensajes duplicados.
 - Configuración de jornadas, descansos, duración de sesiones y ausencias.
 - Cancelación y restauración de turnos; archivo y recuperación de conversaciones.
 - Fichas y reservas compartidas en Supabase, con protección contra turnos superpuestos; modo local opcional.

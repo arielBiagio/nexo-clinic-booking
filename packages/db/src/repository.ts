@@ -274,13 +274,13 @@ export class ClinicRepository {
 
   async book(conversationId: string, slotId: string, requestKey: string, confirmed: boolean) {
     try {
-      return (await this.db.query('select * from private.book_slot($1, $2, $3, $4)', [conversationId, slotId, requestKey, confirmed])).rows[0]!;
+      return await this.db.transaction(async db=>(await db.query('select * from private.book_slot($1, $2, $3, $4)', [conversationId, slotId, requestKey, confirmed])).rows[0]!);
     } catch (error) { return translateDatabaseError(error); }
   }
 
   async escalate(conversationId: string, reason: string) {
     try {
-      return (await this.db.query('select * from private.escalate($1, $2)', [conversationId, reason])).rows[0]!;
+      return await this.db.transaction(async db=>(await db.query('select * from private.escalate($1, $2)', [conversationId, reason])).rows[0]!);
     } catch (error) { return translateDatabaseError(error); }
   }
 }
