@@ -1,0 +1,45 @@
+:root{color-scheme:light}
+:root[data-theme='dark']{
+  color-scheme:dark;
+  --bg:#101a17;
+  --green:#83c9b5;
+  --green-dark:#a6dccb;
+  --muted:#9aaca3;
+  --border:#30433a;
+  --sage:#20372d;
+  --surface:#192620;
+  --surface-soft:#22342b;
+  --surface-overlay:#25392de0;
+  --surface-translucent:#223b2b55;
+  --text-primary:#e4ede7;
+  --text-secondary:#a8b9af;
+  --text-warm:#ddc28f;
+  --text-danger:#e5a399;
+  --text-cool:#a2bdd7;
+  --on-accent:#112b21;
+  --danger-border:#70534d;
+  background:var(--bg);
+}
+:root[data-theme='dark'] .workspace{background:var(--bg)}
+:root[data-theme='dark'] .brand-dot{color:#8cc6ab}
+:root[data-theme='dark'] .doctor-0{--doctor-bg:#213c2f;--doctor-border:#5c9072;--doctor-text:#b9ddc7}
+:root[data-theme='dark'] .doctor-1{--doctor-bg:#403729;--doctor-border:#9f875d;--doctor-text:#e4cba2}
+:root[data-theme='dark'] .patient-avatar.doctor-0{background:#213c2f;color:#b9ddc7;border-color:#3c5a48}
+:root[data-theme='dark'] .patient-avatar.doctor-1{background:#403729;color:#e4cba2;border-color:#665238}
+:root[data-theme='dark'] :is(.sidebar nav button.active,.filter-chip.active,.slot-picker button.selected,.conversation-item.selected,.activity-list li.activity-unread){background:#243e31;color:#c5e5d1}
+:root[data-theme='dark'] :is(.sidebar nav button:hover,.filter-chip:hover,.secondary-button:hover:not(:disabled),.icon-button:hover){background:#2a4034}
+:root[data-theme='dark'] :is(.handoff-card,.handoff-chat-note,.inbox-notice,.chat-connection-error,.chat-message.staff p){background:#332f23;color:#ddc89e;border-color:#51452f}
+:root[data-theme='dark'] .chat-message.patient p{background:#254331;color:#d3e8c9;border-color:#385943}
+:root[data-theme='dark'] .mint{background:#263e2c;color:#a0c6a8}
+:root[data-theme='dark'] .lavender{background:#312e46;color:#b8aedb}
+:root[data-theme='dark'] .peach{background:#403027;color:#d8ad8a}
+:root[data-theme='dark'] .blue{background:#243849;color:#a2c2dc}
+:root[data-theme='dark'] .stat-tag{background:#243c2a;color:#aacaab}
+:root[data-theme='dark'] :is(.stat-tag.warm,.status-pill.amber,.count-badge,.nav-badge){background:#423725;color:#ddc28f}
+:root[data-theme='dark'] .status-pill.green{background:#243c2a;color:#afcfa6}
+:root[data-theme='dark'] :is(.error-message,.load-error,.danger-button){background:#3b2925;color:#edb1a6;border-color:#70534d}
+:root[data-theme='dark'] .danger-button:hover:not(:disabled){background:#4b302a}
+:root[data-theme='dark'] .open-slot:hover{background:#2a4835;color:#c3ddc7;border-color:#739f7e}
+:root[data-theme='dark'] .modal-backdrop{background:#050b08a3}
+:root[data-theme='dark'] .sidebar-scrim{background:#050b0899}
+:root[data-theme='dark'] ::selection{background:#3a624d;color:#fff}

@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { ChevronLeft, ChevronRight, SlidersHorizontal, Plus, CalendarDays } from 'lucide-react';
 import type { Appointment, Dashboard } from './types';
 import { addDays, dateAt, fmtDate, fmtTime, minutesAt } from './api';
+import { matchesAgendaSearch } from './agendaSearch';
 
 export function Calendar({data,onWeek,onBook,onAppointment,filter,onFilter,search,readOnly=false}:{readOnly?:boolean;data:Dashboard;onWeek:(date:string)=>void;onBook:(date?:string,therapistId?:string,slotId?:string)=>void;onAppointment:(a:Appointment)=>void;filter:string;onFilter:(id:string)=>void;search:string}) {
   const [view,setView]=useState<'week'|'day'>('week');
   const [day,setDay]=useState(data.anchorDate);
   const zone=data.clinic.time_zone;
   const days=view==='week'?Array.from({length:5},(_,i)=>addDays(data.weekStart,i)):[day];
-  const appointments=data.appointments.filter(a=>(filter==='all'||a.therapist_id===filter)&&(!search||`${a.patient_name} ${a.therapist_name}`.toLowerCase().includes(search.toLowerCase())));
+  const appointments=data.appointments.filter(a=>(filter==='all'||a.therapist_id===filter)&&matchesAgendaSearch(search,a.patient_name,a.therapist_name));
   const available=data.slots.filter(s=>filter==='all'||s.therapist_id===filter);
   const times=[...appointments,...available];
   const startHour=Math.min(9,...times.map(s=>Math.floor(minutesAt(s.starts_at,zone)/60)));

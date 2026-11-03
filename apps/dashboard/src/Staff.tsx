@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from './api';
 import type { StaffUser, Therapist } from './types';
 
@@ -14,7 +14,9 @@ function MemberRow({member,therapists,onSaved,notify}:{member:Member;therapists:
     <button className="secondary-button" disabled={busy} onClick={()=>void save(!member.active)}>{member.active?'Desactivar':'Reactivar'}</button>
   </article>;
 }
-export function Staff({therapists,notify,onRefresh}:{therapists:Therapist[];notify:(text:string)=>void;onRefresh:()=>void}){
+export function Staff({therapists,notify,onRefresh,focusCreate=0}:{therapists:Therapist[];notify:(text:string)=>void;onRefresh:()=>void;focusCreate?:number}){
+  const createForm=useRef<HTMLFormElement>(null);
+  useEffect(()=>{if(focusCreate){createForm.current?.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'center'});createForm.current?.querySelector('input')?.focus({preventScroll:true});}},[focusCreate]);
   const [members,setMembers]=useState<Member[]>([]),[error,setError]=useState(''),[busy,setBusy]=useState(false);
   const [name,setName]=useState(''),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[role,setRole]=useState<StaffUser['role']>('reception'),[specialty,setSpecialty]=useState('Fisioterapia');
   const load=async()=>{try{setMembers((await api<{staff:Member[]}>('/staff')).staff);setError('');}catch(e){setError((e as Error).message);}};
@@ -25,7 +27,7 @@ export function Staff({therapists,notify,onRefresh}:{therapists:Therapist[];noti
   }catch(e){setError((e as Error).message);}finally{setBusy(false);}};
   return <div className="staff-layout"><section className="panel staff-panel"><h2>Equipo y permisos</h2><p>Administración y recepción operan la clínica. Cada terapeuta consulta su propia agenda.</p>
     {members.map(member=><MemberRow key={`${member.id}-${member.role}-${member.active}-${member.therapist_id}`} member={member} therapists={therapists} onSaved={()=>void load()} notify={notify}/>)}</section>
-    <section className="panel staff-panel"><h2>Crear acceso</h2><form onSubmit={create} className="staff-form">
+    <section className="panel staff-panel"><h2>Crear acceso</h2><form ref={createForm} onSubmit={create} className="staff-form">
       <label>{role==='therapist'?'Nombre del terapeuta':'Nombre'}<input value={name} onChange={e=>setName(e.target.value)} required minLength={2} maxLength={70} autoComplete="off"/></label>
       <label>Correo<input type="email" value={email} onChange={e=>setEmail(e.target.value)} required maxLength={254} autoComplete="off"/></label>
       <label>Contraseña inicial<input type="password" value={password} onChange={e=>setPassword(e.target.value)} required minLength={12} maxLength={128} autoComplete="new-password"/></label>
