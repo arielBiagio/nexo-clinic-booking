@@ -79,3 +79,11 @@
 .preference-sound>span{font-size:13px;color:#71837b;line-height:1.5;flex:1;min-width:150px}
 .preferences-account{border-top:1px solid var(--border);padding-top:20px}
 @media(min-width:1051px){.agenda-rail{top:84px;max-height:calc(100dvh - 100px)}}
+
+/* Use the breadcrumb as the visible section heading. */
+.breadcrumbs{font-size:14px;color:#73847c;gap:11px;min-width:0}
+.breadcrumbs>svg{color:#9aa9a2}
+.breadcrumbs strong{font-size:17px;font-weight:650;color:#2e493e;line-height:1.3}
+.section-actions{display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:9px;margin-bottom:20px}
+@media(max-width:760px){.breadcrumbs{font-size:14px;gap:9px}.breadcrumbs strong{font-size:16px}.section-actions{margin-bottom:18px}}
+@media(max-width:480px){.section-actions{display:grid;grid-template-columns:1fr}.section-actions>button{width:100%}}

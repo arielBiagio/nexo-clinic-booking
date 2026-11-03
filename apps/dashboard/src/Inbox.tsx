@@ -5,13 +5,13 @@ import { api, initials } from './api';
 import { PatientCard } from './PatientCard';
 
 export function Inbox({data,selected,onSelect,onRefresh,notify,onDelete,onRemoved,unread,onRead}:{data:Dashboard;selected:string|null;onSelect:(id:string)=>void;onRefresh:()=>void;notify:(s:string)=>void;onDelete:(id:string)=>Promise<void>;onRemoved:()=>void;unread:Record<string,number>;onRead:()=>Promise<void>}) {
-  const [tab,setTab]=useState<'pending'|'all'>('all'),[chat,setChat]=useState<Chat|null>(null),[text,setText]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [tab,setTab]=useState<'pending'|'all'>(()=>selected&&data.conversations.some(c=>c.id===selected&&!c.handoff_id&&c.status!=='human_led')?'all':'pending'),[chat,setChat]=useState<Chat|null>(null),[text,setText]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const [mobileDetailOpen,setMobileDetailOpen]=useState(Boolean(selected));
   const messages=useRef<HTMLDivElement>(null),textarea=useRef<HTMLTextAreaElement>(null),followLatest=useRef(true),lastConversation=useRef<string|null>(null);
   const drafts=useRef(new Map<string,string>());
   const lastRead=useRef('');
   const cases=data.conversations.filter(c=>c.messageCount>0&&(tab==='all'||c.handoff_id||c.status==='human_led'));
-  const current=selected&&data.conversations.some(c=>c.id===selected)?selected:cases[0]?.id;
+  const current=selected&&cases.some(c=>c.id===selected)?selected:cases[0]?.id;
   useEffect(()=>{if(selected)setMobileDetailOpen(true);},[selected]);
   useEffect(()=>{
     setText(current?drafts.current.get(current)??'':'');setChat(null);setError('');
