@@ -3,6 +3,7 @@ import { HeartPulse, LockKeyhole, LogIn } from 'lucide-react';
 import { api } from './api';
 import { App } from './App';
 import type { StaffUser } from './types';
+import { LoadingPlaceholder } from './LoadingPlaceholder';
 
 export function AuthGate(){
   const [loading,setLoading]=useState(true),[mode,setMode]=useState<'staff'|'demo'>('staff'),[setup,setSetup]=useState(false),[user,setUser]=useState<StaffUser|null>(null);
@@ -24,7 +25,7 @@ export function AuthGate(){
     }catch(e){setError((e as Error).message);}finally{setBusy(false);}
   };
   const logout=async()=>{setBusy(true);setError('');try{await api('/auth/logout',{});setUser(null);sessionStorage.removeItem('nexo-demo-chat');}catch(e){setError((e as Error).message);}finally{setBusy(false);}};
-  if(loading)return <main className="auth-screen"><p>Cargando Nexo…</p></main>;
+  if(loading)return <main className="auth-screen"><LoadingPlaceholder variant="auth" label="Cargando Nexo"/></main>;
   if(user)return <App user={user} accessMode={mode} onLogout={()=>void logout()} onUserChanged={()=>{void api<{user:StaffUser}>('/auth/me').then(session=>setUser(session.user)).catch(()=>setUser(null));}}/>;
   return <main className="auth-screen"><section className="auth-card panel">
     <a href="#" className="brand"><span className="brand-mark"><span/><span/><span/></span><span>nexo<span className="brand-dot">.</span></span></a>

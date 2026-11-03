@@ -123,3 +123,39 @@
 .professional-directory-empty{display:grid;justify-items:center;gap:10px;padding:30px 0;color:var(--muted)}
 
 .staff-overview{display:grid;gap:22px;align-content:start;min-width:0}.staff-panel>.professional-directory{padding:8px 0 0}
+
+/* Loading shapes contain no interactive controls or patient data. */
+.loading-placeholder{width:100%;min-width:0}
+.placeholder-visual{display:grid;gap:20px;pointer-events:none;user-select:none;animation:placeholderPulse 1.8s ease-in-out infinite}
+.placeholder-block{display:block;flex-shrink:0;max-width:100%;border-radius:6px;background:color-mix(in srgb,var(--text-secondary,#8c9b92) 14%,var(--surface,#fff))}
+.placeholder-circle{border-radius:50%}
+.placeholder-panel{padding:20px;border:1px solid var(--border);border-radius:10px;background:var(--surface,#fff);min-width:0}
+.placeholder-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.placeholder-stats>.placeholder-panel{display:grid;gap:16px}
+.placeholder-heading{display:flex;justify-content:space-between;align-items:center;gap:20px}
+.placeholder-agenda-layout{display:grid;grid-template-columns:minmax(0,1fr) var(--agenda-rail-width,238px);gap:var(--agenda-column-gap,20px);align-items:start}
+.placeholder-calendar-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));height:360px;margin-top:24px;background-image:linear-gradient(to right,transparent calc(100% - 1px),var(--border) calc(100% - 1px)),linear-gradient(to bottom,transparent calc(100% - 1px),var(--border) calc(100% - 1px));background-size:20% 100%,100% 64px}
+.placeholder-calendar-grid>div{padding:10px;min-width:0}.placeholder-calendar-event{display:block;margin-top:46px}.placeholder-calendar-event.event-1{margin-top:110px}.placeholder-calendar-event.event-2{margin-top:174px}
+.placeholder-list{display:grid;gap:4px}.placeholder-list-row{display:flex;align-items:center;gap:12px;min-height:65px;padding:12px 0}
+.placeholder-list-row>div{display:grid;gap:9px;flex:1;min-width:0}
+.placeholder-form{display:grid;gap:20px;margin-top:18px}.placeholder-form>div{display:grid;gap:9px}
+.placeholder-details{display:grid;gap:15px;margin:18px 0}.placeholder-details>div{display:grid;grid-template-columns:105px minmax(0,1fr);align-items:center;gap:8px}
+.placeholder-slots{display:flex;flex-wrap:wrap;gap:8px}.loading-placeholder--slots{flex-basis:100%}
+.placeholder-chat{display:flex;flex-direction:column;gap:18px;min-width:0}.placeholder-chat.is-full{height:100%;min-height:0}
+.placeholder-chat-person{display:flex;align-items:center;gap:12px}.placeholder-chat-person>div{display:grid;gap:8px;flex:1}
+.placeholder-messages{display:flex;flex-direction:column;gap:18px;flex:1;min-height:0;padding:12px 0}
+.placeholder-bubble{display:grid;gap:10px;background:var(--surface-soft,#f4f7f5);border-radius:10px;padding:16px;width:76%;max-width:430px}
+.placeholder-bubble.is-patient{align-self:flex-end;width:65%}
+.loading-placeholder--conversation{height:100%;min-height:0}.loading-placeholder--conversation>.placeholder-visual{height:100%}
+.inbox-detail>.loading-placeholder{flex:1;min-height:0;padding:22px}
+.placeholder-inbox{display:grid;grid-template-columns:230px minmax(0,1fr);height:100%;padding:0;min-height:340px;overflow:hidden}
+.placeholder-inbox-list{padding:20px;border-right:1px solid var(--border)}.placeholder-inbox>.placeholder-chat{padding:20px}
+.workspace-inbox .loading-placeholder--inbox{flex:1;min-height:0}.loading-placeholder--inbox>.placeholder-visual{height:100%}.workspace-inbox .placeholder-inbox{min-height:0}
+.loading-placeholder--auth{width:min(100%,440px)}.placeholder-auth{display:grid;gap:22px;padding:34px}
+.placeholder-schedule{display:grid;gap:24px}.placeholder-schedule>div{display:flex;gap:20px;align-items:center;min-height:58px}
+.main-shell>main>.loading-placeholder--form,.main-shell>main>.loading-placeholder--schedule{padding:24px;background:var(--surface,#fff);border:1px solid var(--border);border-radius:10px}
+.activity-popover>.loading-placeholder{padding:0 16px 12px}
+@keyframes placeholderPulse{0%,100%{opacity:1}50%{opacity:.62}}
+@media(max-width:1050px){.placeholder-agenda-layout{grid-template-columns:minmax(0,1fr)}.placeholder-agenda-layout>.placeholder-panel:last-child{display:none}}
+@media(max-width:760px){.placeholder-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.placeholder-panel{padding:16px}.placeholder-inbox{grid-template-columns:minmax(0,1fr)}.placeholder-inbox-list{border-right:0}.placeholder-inbox>.placeholder-chat{display:none}.placeholder-calendar-grid>div{padding:6px}.inbox-detail>.loading-placeholder{padding:14px}}
+@media(prefers-reduced-motion:reduce){.placeholder-visual{animation:none}}

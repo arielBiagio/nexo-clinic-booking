@@ -1,3 +1,4 @@
+import { LoadingPlaceholder } from './LoadingPlaceholder';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowUp, Bot, CheckCheck, Headphones, MessageSquare, Sparkles, Trash2 } from 'lucide-react';
 import type { Chat, Dashboard } from './types';
@@ -79,6 +80,6 @@ export function Inbox({data,selected,onSelect,onRefresh,notify,onDelete,onRemove
           <button className="primary-button" disabled={busy||!text.trim()} type="submit">Enviar<ArrowUp size={15}/></button>
         </div></div>
       </form>
-    </>:<div className="empty-detail"><MessageSquare size={36}/><h2>Elegí una conversación</h2><p>El historial y las respuestas van a aparecer acá.</p>{error&&<p className="error-message" role="alert">{error}</p>}<span><Sparkles size={15}/>Tu equipo y el asistente, en un solo lugar.</span></div>}</div>
+    </>:current&&!error?<LoadingPlaceholder variant="conversation" label="Cargando conversación"/>:<div className="empty-detail"><MessageSquare size={36}/><h2>Elegí una conversación</h2><p>El historial y las respuestas van a aparecer acá.</p>{error&&<p className="error-message" role="alert">{error}</p>}<span><Sparkles size={15}/>Tu equipo y el asistente, en un solo lugar.</span></div>}</div>
   </section>;
 }

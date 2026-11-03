@@ -3,6 +3,7 @@ import { ArrowUp, Bot, CircleCheck, Headphones, RotateCcw,Trash2 } from 'lucide-
 import type { Chat, Choice } from './types';
 import { api } from './api';
 import { PatientCard } from './PatientCard';
+import { LoadingPlaceholder } from './LoadingPlaceholder';
 
 export function Simulator({chat,setChat,onChange,onInbox,onDelete}:{chat:Chat|null;setChat:(c:Chat)=>void;onChange:()=>void;onInbox:(id:string)=>void;onDelete:(id:string)=>Promise<void>}) {
   const [text,setText]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
@@ -26,7 +27,7 @@ export function Simulator({chat,setChat,onChange,onInbox,onDelete}:{chat:Chat|nu
     {chat?.ai?.error&&<div className="chat-connection-error" role="alert"><p>{connectionIssue[chat.ai.error]??'El asistente no está disponible.'} {chat.status==='active'?'Podés continuar con los botones disponibles.':'Este caso quedó en recepción.'}</p><button className="secondary-button full" disabled={busy} onClick={()=>void restart()}><RotateCcw size={14}/>Nueva prueba con IA</button></div>}
     {chat&&<details className="sim-patient"><summary>Mis datos · {chat.patient.name_collected?chat.patient.name:'nombre pendiente'} · {chat.patient.phone?'teléfono guardado':'teléfono pendiente'}</summary><PatientCard conversationId={chat.id} onSaved={()=>{void api<Chat>(`/demo/conversations/${chat.id}`).then(setChat);onChange();}}/></details>}
     <div className="chat-messages" role="log" aria-label="Conversación de prueba" aria-live="polite">
-      {!chat&&<div className="loading-note">Preparando tu conversación…</div>}
+      {!chat&&<LoadingPlaceholder variant="chat" label="Cargando conversación"/>}
       {chat?.messages.map(message=><div key={message.id} className={`chat-message ${message.role}`}><span className="message-author">{message.role==='patient'?'Vos, como paciente':message.role==='staff'?'Recepción':'Asistente'}</span><p>{message.text}</p></div>)}
       {busy&&<div className="typing-dots"><i/><i/><i/></div>}
       {!!chat?.choices.length&&<div className="chat-choices">{chat.choices.map((choice,i)=><button key={`${choice.action}-${i}`} disabled={busy} onClick={()=>void send(choice)}>{(choice.action==='confirm'||choice.action==='confirm_week')&&<CircleCheck size={14}/>} {choice.label}</button>)}</div>}

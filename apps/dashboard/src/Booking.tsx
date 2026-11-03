@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { CalendarDays, Check, Clock3, ShieldCheck } from 'lucide-react';
 import { api, addDays, dayInstant, fmtDate, fmtTime } from './api';
 import type { Appointment,Dashboard, Slot } from './types';
+import { LoadingPlaceholder } from './LoadingPlaceholder';
 interface PatientMatch {id:string;name:string;phone:string;conversation_id:string;telegram:boolean}
 
 export function Booking({data,initialDate,initialTherapist,initialSlot,ownTherapistId,editing,onDone,notify}:{data:Dashboard;initialDate?:string;initialTherapist?:string;initialSlot?:string;ownTherapistId?:string|undefined;editing?:Appointment;onDone:()=>void;notify:(s:string)=>void}) {
@@ -41,15 +42,15 @@ export function Booking({data,initialDate,initialTherapist,initialSlot,ownTherap
     {!editing&&<>
     {existing?<div className="booking-summary"><div><strong>Ficha existente: {existing.name}</strong><span>{existing.telegram?'Vinculada a Telegram':'Se conservarán su ficha e historial'}</span></div><button type="button" className="secondary-button" onClick={()=>{setExisting(null);setName('');setPhone('');requestId.current=crypto.randomUUID();}}>Cambiar ficha</button></div>:<>
       <label>Buscar ficha existente<input value={lookup} onChange={e=>setLookup(e.target.value)} maxLength={70} placeholder="Nombre o teléfono" autoComplete="off"/></label>
-      {searching&&<p className="muted">Buscando fichas…</p>}
-      {!!matches.length&&<div className="chat-choices">{matches.map(patient=><button key={patient.id} type="button" onClick={()=>{setExisting(patient);setName(patient.name);setPhone(patient.phone);setLookup('');setMatches([]);requestId.current=crypto.randomUUID();}}>{patient.name} · {patient.phone}{patient.telegram?' · Telegram':''}</button>)}</div>}
+      {searching&&<LoadingPlaceholder variant="list" count={2} label="Buscando fichas"/>}
+      {!searching&&!!matches.length&&<div className="chat-choices">{matches.map(patient=><button key={patient.id} type="button" onClick={()=>{setExisting(patient);setName(patient.name);setPhone(patient.phone);setLookup('');setMatches([]);requestId.current=crypto.randomUUID();}}>{patient.name} · {patient.phone}{patient.telegram?' · Telegram':''}</button>)}</div>}
       <p className="privacy-note">Si ya habló por Telegram, elegí su ficha para que el bot encuentre también esta reserva. Para un paciente nuevo, completá los datos debajo.</p>
     </>}
     <label>Nombre del paciente<input placeholder="Ej. Martina Demo" value={name} readOnly={!!existing} required maxLength={70} onChange={e=>setName(e.target.value)} autoComplete="off"/></label>
     <label>Teléfono del paciente<input type="tel" placeholder="Ej. 202 555 0108" value={phone} readOnly={!!existing} required maxLength={40} onChange={e=>setPhone(e.target.value)} autoComplete="off"/></label></>}
     <div className="form-row"><label>Profesional<select value={therapist} onChange={e=>setTherapist(e.target.value)}>{data.therapists.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label><label>Fecha<input aria-label="Fecha del turno" type="date" value={date} required onInput={e=>{if(e.currentTarget.value)setDate(e.currentTarget.value);}}/></label></div>
     <div className="field-label"><Clock3 size={15}/>Horarios disponibles <span>{zone.replaceAll('_',' ')}</span></div>
-    <div className="slot-picker">{loading?<p className="muted">Buscando horarios…</p>:slots.length?slots.map(slot=><button key={slot.id} type="button" className={selected?.id===slot.id?'selected':''} onClick={()=>setSelected(slot)}>{fmtTime(slot.starts_at,zone)}{selected?.id===slot.id&&<Check size={13}/>}</button>):<p className="no-slots">No hay horarios disponibles ese día. Probá con otra fecha o profesional.</p>}</div>
+    <div className="slot-picker">{loading?<LoadingPlaceholder variant="slots" count={6} label="Buscando horarios"/>:slots.length?slots.map(slot=><button key={slot.id} type="button" className={selected?.id===slot.id?'selected':''} onClick={()=>setSelected(slot)}>{fmtTime(slot.starts_at,zone)}{selected?.id===slot.id&&<Check size={13}/>}</button>):<p className="no-slots">No hay horarios disponibles ese día. Probá con otra fecha o profesional.</p>}</div>
     {selected&&<div className="booking-summary"><CalendarDays size={21}/><div><strong>{fmtDate(date,{weekday:'long',day:'numeric',month:'long'})}, {fmtTime(selected.starts_at,zone)}</strong><span>{data.therapists.find(t=>t.id===therapist)?.name} · {Math.round((Date.parse(selected.ends_at)-Date.parse(selected.starts_at))/60_000)} minutos</span></div></div>}
     {error&&<p className="error-message" role="alert">{error}</p>}
     <p className="privacy-note"><ShieldCheck size={14}/>{editing?'Si el paciente usa Telegram, el cambio quedará pendiente de envío a su chat.':'Usá datos ficticios. No se enviarán emails.'}</p>

@@ -19,6 +19,7 @@ import { Preferences } from './Preferences';
 import { QuickActions } from './QuickActions';
 import { useTheme } from './useTheme';
 import { matchesAgendaSearch } from './agendaSearch';
+import { LoadingPlaceholder } from './LoadingPlaceholder';
 
 type Page='agenda'|'inbox'|'schedule'|'team'|'profile';
 export function App({user,accessMode,onLogout,onUserChanged}:{user:StaffUser;accessMode:'demo'|'staff';onLogout:()=>void;onUserChanged?:()=>void}) {
@@ -94,7 +95,7 @@ export function App({user,accessMode,onLogout,onUserChanged}:{user:StaffUser;acc
       <main data-page={page} className={page==='inbox'?'inbox-main':undefined}>
         <h1 className="sr-only">{pageTitles[page]}</h1>
         {error&&<div className="load-error" role="alert"><span>{error}</span><button className="secondary-button" onClick={refresh}>Reintentar</button></div>}
-        {!data&&!error&&<div className="loading-screen"><span className="loading-spinner"/><h2>Preparando tu clínica…</h2><p>Estamos organizando la agenda de prueba.</p></div>}
+        {!data&&!error&&<LoadingPlaceholder variant={page==='agenda'?'dashboard':page==='inbox'?'inbox':page==='schedule'?'schedule':'form'} label="Cargando sección"/>}
         {data&&<>
           {page==='agenda'&&<><div className="stats-grid"><div className="stat-card"><span className="stat-icon mint"><CalendarCheck2 size={19}/></span><span className="stat-label">Turnos esta semana</span><div><strong>{data.appointments.length}</strong><span className="stat-tag"><Check size={12}/>Confirmados</span></div></div><div className="stat-card"><span className="stat-icon lavender"><Clock3 size={19}/></span><span className="stat-label">Horarios disponibles</span><div><strong>{data.slots.length}</strong><span className="stat-description">para reservar</span></div></div><button disabled={isTherapist} className="stat-card stat-button" onClick={()=>openInbox()}><span className="stat-icon peach"><Headphones size={19}/></span><span className="stat-label">Necesitan una mano</span><div><strong>{pending.length}</strong><span className={`stat-tag ${pending.length?'warm':''}`}>{pending.length?'En recepción':'Todo al día'}<ArrowUpRight size={12}/></span></div></button><button className="stat-card stat-button" onClick={()=>navigate('team')} aria-label={canManageStaff?'Ver equipo y profesionales':'Ver profesionales'}><span className="stat-icon blue"><Users size={19}/></span><span className="stat-label">Profesionales</span><div><strong>{professionals.length}</strong><span className="avatar-stack">{professionals.map((t,i)=><i key={t.id} className={`doctor-${i}`}>{initials(t.name)}</i>)}</span></div></button></div>
           <div className="agenda-section-heading"><div><h2>Agenda semanal<span className="small-tag">{fmtDate(data.weekStart,{month:'long',year:'numeric'})}</span></h2></div><div className="agenda-search"><Search size={15}/><input type="search" maxLength={120} autoComplete="off" aria-label="Buscar paciente o profesional" placeholder="Buscar paciente o profesional…" value={search} onChange={e=>setSearch(e.target.value)}/>{search&&<button className="icon-button" aria-label="Limpiar búsqueda" onClick={()=>setSearch('')}><X size={15}/></button>}<button className={`icon-button ${loading?'spinning':''}`} aria-label="Actualizar agenda" onClick={refresh}><RefreshCw size={15}/></button></div></div>
