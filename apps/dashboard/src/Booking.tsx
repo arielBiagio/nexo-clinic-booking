@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { CalendarDays, Check, Clock3, ShieldCheck } from 'lucide-react';
 import { api, addDays, dayInstant, fmtDate, fmtTime } from './api';
 import type { Appointment,Dashboard, Slot } from './types';
+interface PatientMatch {id:string;name:string;phone:string;conversation_id:string;telegram:boolean}
 
 export function Booking({data,initialDate,initialTherapist,initialSlot,ownTherapistId,editing,onDone,notify}:{data:Dashboard;initialDate?:string;initialTherapist?:string;initialSlot?:string;ownTherapistId?:string|undefined;editing?:Appointment;onDone:()=>void;notify:(s:string)=>void}) {
   const [name,setName]=useState('');
@@ -10,9 +11,15 @@ export function Booking({data,initialDate,initialTherapist,initialSlot,ownTherap
   const [date,setDate]=useState(initialDate??data.anchorDate);
   const [slots,setSlots]=useState<Slot[]>([]),[selected,setSelected]=useState<Slot|null>(null);
   const [busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[error,setError]=useState('');
-  const conversation=useRef<string|null>(null);
+  const [lookup,setLookup]=useState(''),[matches,setMatches]=useState<PatientMatch[]>([]),[existing,setExisting]=useState<PatientMatch|null>(null),[searching,setSearching]=useState(false);
   const requestId=useRef(crypto.randomUUID());
   const zone=data.clinic.time_zone;
+  useEffect(()=>{
+    if(editing||lookup.trim().length<2){setMatches([]);setSearching(false);return;}
+    let active=true;setSearching(true);
+    const timer=setTimeout(()=>{void api<PatientMatch[]>(`/patients/search?q=${encodeURIComponent(lookup.trim())}`).then(rows=>{if(active)setMatches(rows);}).catch(e=>{if(active)setError(e.message);}).finally(()=>{if(active)setSearching(false);});},300);
+    return()=>{active=false;clearTimeout(timer);};
+  },[lookup,editing]);
   useEffect(()=>{let active=true;setLoading(true);setSelected(null);setError('');
     const params=new URLSearchParams({therapistId:therapist,from:dayInstant(date,zone),to:dayInstant(addDays(date,1),zone)});
     api<Slot[]>(`/availability?${params}`).then(value=>{if(active){setSlots(value);if(initialSlot)setSelected(value.find(slot=>slot.id===initialSlot)??null);}}).catch(e=>{if(active)setError(e.message);}).finally(()=>{if(active)setLoading(false);});
@@ -25,21 +32,21 @@ export function Booking({data,initialDate,initialTherapist,initialSlot,ownTherap
         await api(`/appointments/${editing.id}/reschedule`,{slotId:selected.id,expectedVersion:editing.version,confirmed:true},'POST',{'Idempotency-Key':requestId.current});
         notify('Turno reprogramado. El horario anterior quedó libre.');onDone();return;
       }
-      if(ownTherapistId){
-        await api(`/therapists/${ownTherapistId}/appointments`,{slotId:selected.id,confirmed:true,name:name.trim(),phone:phone.trim()},'POST',{'Idempotency-Key':requestId.current});
-        notify('Turno reservado. Ya aparece en tu agenda.');onDone();return;
-      }
-      if(!conversation.current)conversation.current=(await api<{id:string}>('/demo/conversations',{name:name.trim()})).id;
-      await api(`/conversations/${conversation.current}/patient`,{name:name.trim(),phone:phone.trim()},'PATCH');
-      await api(`/conversations/${conversation.current}/selection`,{slotId:selected.id});
-      await api(`/conversations/${conversation.current}/book`,{slotId:selected.id,confirmed:true},'POST',{'Idempotency-Key':`manual-${selected.id}-${conversation.current}`});
+      await api(`/therapists/${ownTherapistId??therapist}/appointments`,{slotId:selected.id,confirmed:true,name:name.trim(),phone:phone.trim(),...(existing?{conversationId:existing.conversation_id}:{})},'POST',{'Idempotency-Key':requestId.current});
       notify('Turno reservado. Ya aparece en tu agenda.');onDone();
     }catch(e){setError((e as Error).message);}finally{setBusy(false);}
   };
   return <form className="booking-form" onSubmit={e=>{e.preventDefault();void save();}}>
     <p className="form-intro">{editing?`Elegí un nuevo día y horario para ${editing.patient_name}. Su reserva actual se mantiene hasta confirmar el cambio.`:'Elegí un profesional y confirmá el horario para tu paciente de prueba.'}</p>
-    {!editing&&<><label>Nombre del paciente<input placeholder="Ej. Martina Demo" value={name} required maxLength={70} onChange={e=>setName(e.target.value)} autoComplete="off"/></label>
-    <label>Teléfono del paciente<input type="tel" placeholder="Ej. 202 555 0108" value={phone} required maxLength={40} onChange={e=>setPhone(e.target.value)} autoComplete="off"/></label></>}
+    {!editing&&<>
+    {existing?<div className="booking-summary"><div><strong>Ficha existente: {existing.name}</strong><span>{existing.telegram?'Vinculada a Telegram':'Se conservarán su ficha e historial'}</span></div><button type="button" className="secondary-button" onClick={()=>{setExisting(null);setName('');setPhone('');requestId.current=crypto.randomUUID();}}>Cambiar ficha</button></div>:<>
+      <label>Buscar ficha existente<input value={lookup} onChange={e=>setLookup(e.target.value)} maxLength={70} placeholder="Nombre o teléfono" autoComplete="off"/></label>
+      {searching&&<p className="muted">Buscando fichas…</p>}
+      {!!matches.length&&<div className="chat-choices">{matches.map(patient=><button key={patient.id} type="button" onClick={()=>{setExisting(patient);setName(patient.name);setPhone(patient.phone);setLookup('');setMatches([]);requestId.current=crypto.randomUUID();}}>{patient.name} · {patient.phone}{patient.telegram?' · Telegram':''}</button>)}</div>}
+      <p className="privacy-note">Si ya habló por Telegram, elegí su ficha para que el bot encuentre también esta reserva. Para un paciente nuevo, completá los datos debajo.</p>
+    </>}
+    <label>Nombre del paciente<input placeholder="Ej. Martina Demo" value={name} readOnly={!!existing} required maxLength={70} onChange={e=>setName(e.target.value)} autoComplete="off"/></label>
+    <label>Teléfono del paciente<input type="tel" placeholder="Ej. 202 555 0108" value={phone} readOnly={!!existing} required maxLength={40} onChange={e=>setPhone(e.target.value)} autoComplete="off"/></label></>}
     <div className="form-row"><label>Profesional<select value={therapist} onChange={e=>setTherapist(e.target.value)}>{data.therapists.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label><label>Fecha<input aria-label="Fecha del turno" type="date" value={date} required onInput={e=>{if(e.currentTarget.value)setDate(e.currentTarget.value);}}/></label></div>
     <div className="field-label"><Clock3 size={15}/>Horarios disponibles <span>{zone.replaceAll('_',' ')}</span></div>
     <div className="slot-picker">{loading?<p className="muted">Buscando horarios…</p>:slots.length?slots.map(slot=><button key={slot.id} type="button" className={selected?.id===slot.id?'selected':''} onClick={()=>setSelected(slot)}>{fmtTime(slot.starts_at,zone)}{selected?.id===slot.id&&<Check size={13}/>}</button>):<p className="no-slots">No hay horarios disponibles ese día. Probá con otra fecha o profesional.</p>}</div>

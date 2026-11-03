@@ -41,7 +41,7 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
       if(request.staff.role==='therapist'){
         const own=request.staff.therapistId;
         const route=pathname??'',method=request.method;
-        let allowed=method==='GET'&&(['/v1/auth/me','/v1/dashboard','/v1/therapists','/v1/demo/removed/appointments'].includes(route)||route==='/v1/availability'&&new URL(request.url,'http://local').searchParams.get('therapistId')===own);
+        let allowed=method==='GET'&&(['/v1/auth/me','/v1/dashboard','/v1/therapists','/v1/demo/removed/appointments','/v1/patients/search'].includes(route)||route==='/v1/availability'&&new URL(request.url,'http://local').searchParams.get('therapistId')===own);
         if(route===`/v1/therapists/${own}/profile`&&['GET','PATCH'].includes(method)||route===`/v1/therapists/${own}/schedule`&&['GET','PUT'].includes(method)||route===`/v1/therapists/${own}/time-off`&&method==='POST'||route.startsWith(`/v1/therapists/${own}/time-off/`)&&method==='DELETE'||route===`/v1/therapists/${own}/appointments`&&method==='POST')allowed=true;
         const appointment=route.match(/^\/v1\/appointments\/([^/]+)(\/restore|\/reschedule)?$/);
         if(appointment&&(method==='DELETE'&&!appointment[2]||method==='POST'&&appointment[2])){
@@ -83,11 +83,16 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
   app.get('/v1/therapists/:id/profile',request=>repository.getTherapistProfile(id.parse((request.params as {id:string}).id)));
   app.patch('/v1/therapists/:id/profile',request=>repository.updateTherapistProfile(id.parse((request.params as {id:string}).id),z.strictObject({name:z.string().trim().min(2).max(70),specialty:z.string().trim().min(2).max(120)}).parse(request.body),request.staff));
   app.post('/v1/therapists/:id/appointments',request=>{
-    const input=z.strictObject({slotId:id,confirmed:z.literal(true),name:z.string().trim().min(2).max(70),phone:z.string().min(7).max(40)}).parse(request.body);
+    const input=z.strictObject({slotId:id,confirmed:z.literal(true),name:z.string().trim().min(2).max(70),phone:z.string().min(7).max(40),conversationId:id.optional()}).parse(request.body);
     const requestId=z.uuid().parse(request.headers['idempotency-key']);
     return repository.createManualAppointment(id.parse((request.params as {id:string}).id),input,requestId,request.staff);
   });
   app.get('/v1/conversations', () => repository.getConversations());
+  app.get('/v1/patients/search',request=>{
+    if(request.staff?.role==='therapist'&&!request.staff.therapistId)throw new DomainError('FORBIDDEN',403);
+    const input=z.strictObject({q:z.string().trim().min(2).max(70)}).parse(request.query);
+    return repository.searchPatients(input.q,request.staff?.role==='therapist'?request.staff.therapistId??undefined:undefined);
+  });
   app.get('/v1/inbox/unread',request=>repository.getUnreadConversations(request.staff?.id??'local'));
   app.post('/v1/conversations/:id/read',request=>{
     const input=z.strictObject({lastMessageId:id}).parse(request.body);

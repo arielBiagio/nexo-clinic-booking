@@ -51,6 +51,9 @@ export class DemoService {
     return this.serial(id,async()=>{
       let snapshot:Session|undefined;
       const result=await this.repository.db.transaction(async db=>{
+        // The same verified patient may resume through another conversation.
+        const patient=await this.repository.getConversationPatientId(id,db);
+        await db.query('select id from public.patients where id=$1 for update',[patient]);
         // A database lock serializes retries and staff/patient actions across server instances.
         const row=(await db.query<{pending:string|null}>(`select case when pending_expires_at>now() and status='active' then pending_slot_id end as pending
           from public.conversations where id=$1 for update`,[id])).rows[0];
@@ -114,7 +117,7 @@ export class DemoService {
     if(!this.scoped)return this.stored(id,service=>service.get(id));
     const row = (await this.repository.db.query(`select c.id,c.status,p.name,
       case when c.pending_expires_at>now() then c.pending_slot_id end as pending_slot_id,
-      exists(select 1 from public.appointments a where a.conversation_id=c.id and a.status='confirmed') as has_appointment from public.conversations c
+      exists(select 1 from public.appointments a where a.patient_id=p.id and a.status='confirmed') as has_appointment from public.conversations c
       join public.patient_identities i on i.id=c.identity_id join public.patients p on p.id=i.patient_id where c.id=$1 and c.archived_at is null`, [id])).rows[0];
     if (!row) throw new DomainError('CONVERSATION_NOT_FOUND', 404);
     let session = this.sessions.get(id);
@@ -141,7 +144,7 @@ export class DemoService {
     await this.repository.db.query('update public.conversations set pending_slot_id=null,pending_expires_at=null where id=$1',[id]);
     if(!target){
       session.rescheduling=null;session.search=filter;
-      this.add(session,'assistant',current.appointments.length?'¿Cuál de tus turnos querés cambiar? El turno actual se mantiene hasta que confirmes otro horario.':'No encuentro una reserva futura para cambiar en esta conversación. Recepción puede ayudarte a localizarla.');
+      this.add(session,'assistant',current.appointments.length?'¿Cuál de tus turnos querés cambiar? El turno actual se mantiene hasta que confirmes otro horario.':'No encuentro una reserva futura vinculada a tu ficha. Si se creó manualmente con otra ficha, recepción puede vincularla sin volver a reservar.');
       const zone=(await this.repository.db.query<{time_zone:string}>('select time_zone from public.clinics')).rows[0]!.time_zone;
       session.choices=current.appointments.map(a=>({action:'reschedule',appointmentId:a.id,label:`Cambiar ${new Intl.DateTimeFormat('es-AR',{timeZone:zone,day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(a.start))} · ${a.therapistName}`}));
       session.choices.push({label:'Hablar con recepción',action:'human'});return false;

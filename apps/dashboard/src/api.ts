@@ -1,6 +1,7 @@
 import { Temporal } from '@js-temporal/polyfill';
 
 const errors:Record<string,string> = {
+  PATIENT_DETAILS_CHANGED:'La ficha cambió o le falta contacto. Volvé a buscarla y revisá nombre y teléfono en Conversaciones.',
   APPOINTMENT_CHANGED:'El turno cambió mientras lo editabas. Cerrá esta ventana y volvé a abrirlo desde la agenda actualizada.',
   APPOINTMENT_NOT_EDITABLE:'Solo se pueden reprogramar reservas confirmadas que todavía no comenzaron.',
   MESSAGE_NOT_FOUND:'El mensaje ya no está disponible en esta conversación.',
