@@ -17,7 +17,7 @@
 - Cancelación por chat con elección del turno y confirmación explícita.
 - Avisos por conversación con atención humana pendiente y campana con actividad de turnos.
 - Ajustes personales de notificaciones del navegador y sonidos, con acceso para cerrar sesión.
-- Modo claro y seis paletas oscuras con vista previa y preferencia guardada.
+- Modo claro y oscuro Obsidiana, con preferencia guardada.
 - Transiciones de navegación y diálogos, con movimiento reducido según el sistema.
 - Accesos rápidos para crear turnos o administrar accesos del equipo.
 - Configuración de jornadas, descansos, duración de sesiones y ausencias.

@@ -1,22 +1,22 @@
 :root{color-scheme:light}
 :root[data-theme='dark']{
   color-scheme:dark;
-  --bg:#101a17;
-  --green:#83c9b5;
-  --green-dark:#a6dccb;
-  --muted:#9aaca3;
-  --border:#30433a;
+  --bg:#0c1013;
+  --green:#7bced4;
+  --green-dark:#a0e0e4;
+  --muted:#97acb4;
+  --border:#34444d;
   --sage:color-mix(in srgb,var(--green) 12%,var(--surface));
-  --surface:#192620;
-  --surface-soft:#22342b;
+  --surface:#161d22;
+  --surface-soft:#222d34;
   --surface-overlay:color-mix(in srgb,var(--surface) 90%,transparent);
   --surface-translucent:color-mix(in srgb,var(--surface-soft) 35%,transparent);
-  --text-primary:#e4ede7;
-  --text-secondary:#a8b9af;
+  --text-primary:#e1ecef;
+  --text-secondary:#a1b5bc;
   --text-warm:#ddc28f;
   --text-danger:#e5a399;
   --text-cool:#a2bdd7;
-  --on-accent:#112b21;
+  --on-accent:#09272a;
   --danger-border:#70534d;
   background:var(--bg);
 }
@@ -44,35 +44,14 @@
 :root[data-theme='dark'] .sidebar-scrim{background:#05060899}
 :root[data-theme='dark'] ::selection{background:color-mix(in srgb,var(--green) 40%,var(--surface));color:var(--text-primary)}
 
-/* Alternative palettes affect every surface while keeping status colors consistent. */
-:root[data-theme='dark'][data-palette='graphite']{
- --bg:#121416;--surface:#1c1f22;--surface-soft:#262b2e;--border:#343b3f;
- --green:#8fb9db;--green-dark:#b0cfe7;--muted:#a0abb4;--text-primary:#e7edf1;--text-secondary:#aab4bd;--on-accent:#102435;
-}
-:root[data-theme='dark'][data-palette='midnight']{
- --bg:#0d1423;--surface:#151f32;--surface-soft:#202d43;--border:#334158;
- --green:#91aef5;--green-dark:#b1c5ff;--muted:#9caecb;--text-primary:#e3eafa;--text-secondary:#a8b7d0;--on-accent:#14243c;
-}
-:root[data-theme='dark'][data-palette='amethyst']{
- --bg:#18141f;--surface:#231d2d;--surface-soft:#30263d;--border:#483952;
- --green:#c1a0e6;--green-dark:#dac0f4;--muted:#b1a0bd;--text-primary:#efe7f6;--text-secondary:#b9abc5;--on-accent:#2d1c3b;
-}
-:root[data-theme='dark'][data-palette='coffee']{
- --bg:#1b1714;--surface:#28211d;--surface-soft:#372d25;--border:#4c3e33;
- --green:#d5b38d;--green-dark:#edcfac;--muted:#b3a28f;--text-primary:#f0e8df;--text-secondary:#baac9c;--on-accent:#302316;
-}
-:root[data-theme='dark'][data-palette='obsidian']{
- --bg:#0c1013;--surface:#161d22;--surface-soft:#222d34;--border:#34444d;
- --green:#7bced4;--green-dark:#a0e0e4;--muted:#97acb4;--text-primary:#e1ecef;--text-secondary:#a1b5bc;--on-accent:#09272a;
-}
 .appearance-heading{display:flex;align-items:center;gap:10px;color:var(--green)}
-.appearance-heading h3{font-size:15px;font-weight:600;color:var(--text-primary,#334a40)}
-.appearance-light{display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid var(--border);border-radius:9px;font-size:14px;text-align:left}
-.appearance-light span{flex:1}.appearance-light.selected{border-color:var(--green);background:var(--sage)}
+.appearance-heading h3{font-size:14.5px;font-weight:600;color:var(--text-primary,#334a40)}
+
+
 .palette-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .palette-option{min-width:0;text-align:left;padding:7px;border:1px solid var(--border);border-radius:11px;display:flex;flex-direction:column;gap:4px}
 .palette-option.selected{border-color:var(--green);box-shadow:0 0 0 1px var(--green)}
-.palette-option strong{font-size:14px;line-height:1.5;padding:3px 3px 0;font-weight:600}
+.palette-option strong{font-size:13.5px;line-height:1.5;padding:3px 3px 0;font-weight:600}
 .palette-option>small{font-size:12px;line-height:1.5;padding:0 3px 3px;color:var(--text-secondary,#71837b)}
 .palette-preview{height:80px;width:100%;display:flex;border-radius:6px;overflow:hidden;position:relative;background:var(--preview-bg)}
 .palette-preview-rail{width:22%;background:var(--preview-surface);padding:11px 7px;display:flex;flex-direction:column;gap:9px}
