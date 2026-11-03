@@ -1,15 +1,23 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 
 export function Dialog({title,children,onClose,drawer=false}:{title:string;children:ReactNode;onClose:()=>void;drawer?:boolean}) {
   const ref=useRef<HTMLDivElement>(null);
+  const [closing,setClosing]=useState(false);
+  const closeTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
   const closeRef=useRef(onClose);closeRef.current=onClose;
+  const dismiss=()=>{
+    if(closeTimer.current)return;
+    if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){closeRef.current();return;}
+    setClosing(true);closeTimer.current=setTimeout(()=>closeRef.current(),160);
+  };
+  const dismissRef=useRef(dismiss);dismissRef.current=dismiss;
   useEffect(()=>{
     const previous=document.activeElement as HTMLElement|null;
     const old=document.body.style.overflow;document.body.style.overflow='hidden';
     ref.current?.focus();
     const key=(event:KeyboardEvent)=>{
-      if(event.key==='Escape')closeRef.current();
+      if(event.key==='Escape')dismissRef.current();
       if(event.key==='Tab'){
         const items=ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]');
         if(!items?.length)return;
@@ -19,11 +27,11 @@ export function Dialog({title,children,onClose,drawer=false}:{title:string;child
       }
     };
     document.addEventListener('keydown',key);
-    return ()=>{document.body.style.overflow=old;document.removeEventListener('keydown',key);previous?.focus();};
+    return ()=>{if(closeTimer.current)clearTimeout(closeTimer.current);document.body.style.overflow=old;document.removeEventListener('keydown',key);previous?.focus();};
   },[]);
-  return <div className={`modal-backdrop ${drawer?'drawer-backdrop':''}`} onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}>
-    <div className={`dialog ${drawer?'drawer':''}`} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={ref}>
-      <div className="dialog-heading"><h2>{title}</h2><button className="icon-button" aria-label="Cerrar" onClick={onClose}><X size={20}/></button></div>
+  return <div className={`modal-backdrop ${drawer?'drawer-backdrop':''}${closing?' is-closing':''}`} onMouseDown={event=>{if(event.target===event.currentTarget)dismiss();}}>
+    <div className={`dialog ${drawer?'drawer':''}`} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={ref} inert={closing}>
+      <div className="dialog-heading"><h2>{title}</h2><button className="icon-button" aria-label="Cerrar" onClick={dismiss}><X size={20}/></button></div>
       {children}
     </div>
   </div>;

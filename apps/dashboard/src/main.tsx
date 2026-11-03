@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { AuthGate } from './Auth';
 import './styles.css';
 import './theme.css';
+import './motion.css';
 import { initializeTheme } from './useTheme';
 
 initializeTheme();

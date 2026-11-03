@@ -1,0 +1,35 @@
+:root{--motion-fast:150ms;--motion-normal:220ms;--motion-ease:cubic-bezier(.2,.7,.2,1);transition:background-color 180ms ease,color 180ms ease}
+:is(.workspace,.sidebar,.topbar,.panel,.stat-card,.dialog,.dialog-heading,.activity-popover,.patient-card,.inbox-context,.inbox-list,.inbox-messages,.staff-reply,.chat-message p,.day-headers,.time-column,.calendar-day-footers,.quick-actions-menu,input,select,textarea){transition:background-color 180ms ease,color 180ms ease,border-color 180ms ease,box-shadow var(--motion-fast) ease,transform var(--motion-fast) var(--motion-ease)}
+.sidebar{transition:transform var(--motion-normal) var(--motion-ease),background-color 180ms ease,color 180ms ease,border-color 180ms ease}
+button{transition:background-color 180ms ease,color 180ms ease,border-color 180ms ease,box-shadow var(--motion-fast) ease,transform var(--motion-fast) var(--motion-ease),filter var(--motion-fast) ease}
+.main-shell>main{animation:appPageIn 200ms var(--motion-ease)}
+.modal-backdrop{animation:appBackdropIn var(--motion-fast) ease}
+.dialog{animation:appDialogIn var(--motion-normal) var(--motion-ease)}
+.drawer{animation:appDrawerIn var(--motion-normal) var(--motion-ease)}
+.modal-backdrop.is-closing{animation:appBackdropOut 160ms ease forwards}
+.modal-backdrop.is-closing .dialog{animation:appDialogOut 160ms ease forwards;pointer-events:none}
+.modal-backdrop.is-closing .drawer{animation:appDrawerOut 160ms ease forwards}
+.activity-popover{transform-origin:top right;animation:appPopoverIn 170ms var(--motion-ease)}
+.chat-message{animation:appMessageIn 170ms var(--motion-ease)}
+.stats-grid>.stat-card{animation:appCardIn 220ms var(--motion-ease) backwards}
+.stats-grid>.stat-card:nth-child(2){animation-delay:30ms}.stats-grid>.stat-card:nth-child(3){animation-delay:60ms}.stats-grid>.stat-card:nth-child(4){animation-delay:90ms}
+:is(.primary-button,.secondary-button,.icon-button,.appearance-light,.palette-option,.quick-actions-trigger):active:not(:disabled){transform:scale(.97)}
+.stat-button:active:not(:disabled){transform:scale(.99)}
+@media(hover:hover) and (pointer:fine){
+ .palette-option:hover{transform:translateY(-2px);box-shadow:0 4px 13px #0e241719}
+ .sidebar nav button:hover{transform:translateX(2px)}
+ .primary-button:hover:not(:disabled),.secondary-button:hover:not(:disabled){transform:translateY(-1px)}
+}
+@keyframes appPageIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes appBackdropIn{from{opacity:0}to{opacity:1}}
+@keyframes appBackdropOut{from{opacity:1}to{opacity:0}}
+@keyframes appDialogIn{from{opacity:0;transform:translateY(10px) scale(.985)}to{opacity:1;transform:none}}
+@keyframes appDialogOut{from{opacity:1;transform:none}to{opacity:0;transform:translateY(7px) scale(.985)}}
+@keyframes appDrawerIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:none}}
+@keyframes appDrawerOut{from{opacity:1;transform:none}to{opacity:0;transform:translateX(18px)}}
+@keyframes appPopoverIn{from{opacity:0;transform:translateY(-5px) scale(.98)}to{opacity:1;transform:none}}
+@keyframes appMessageIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@keyframes appCardIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){
+ *,*::before,*::after{animation-duration:.01ms!important;animation-delay:0ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+}

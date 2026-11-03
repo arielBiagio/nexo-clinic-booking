@@ -1,9 +1,12 @@
 import { Bell, CalendarDays, LogOut, Volume2 } from 'lucide-react';
 import type { NotificationSettings } from './useNotifications';
+import type { AppearanceSettings } from './useTheme';
+import { AppearancePicker } from './AppearancePicker';
 
-export function Preferences({settings,canLogout,onLogout}:{settings:NotificationSettings;canLogout:boolean;onLogout:()=>void}){
+export function Preferences({settings,appearance,onPreviewAppearance,canLogout,onLogout}:{settings:NotificationSettings;appearance:AppearanceSettings;onPreviewAppearance:()=>void;canLogout:boolean;onLogout:()=>void}){
   return <div className="preferences-content">
     <p className="preferences-intro">Configurá tus avisos y las conexiones de tu agenda.</p>
+    <AppearancePicker appearance={appearance} onPreview={onPreviewAppearance}/>
     <section className="preference-group">
       <label className="preference-toggle"><Bell size={19}/><span><strong>Notificaciones del navegador</strong><small>Avisar cuando estés en otra pestaña.</small></span><input type="checkbox" checked={settings.notificationsEnabled} disabled={settings.permission==='unsupported'||settings.permission==='denied'} onChange={event=>void settings.setNotifications(event.target.checked)}/></label>
       {settings.permission==='unsupported'&&<p className="preference-note">Este navegador no admite notificaciones para esta página.</p>}
