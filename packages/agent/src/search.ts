@@ -7,6 +7,12 @@ type Therapist={id:string;name:string;specialty:string};
 const freshSearch=/\b(quiero|quisiera|necesito|busco|buscar|reservar|sacar|gustaria|turnos?|citas?|fisio|fisioterapia|kinesiologia)\b/;
 const refinement=(value:string)=>!freshSearch.test(value)&&/\b(hoy|manana|lunes|martes|miercoles|jueves|viernes|sabado|domingo|semana|la tarde|la noche)\b/.test(value);
 const anyTherapist=/\b(cualquier(?:a)?|cualquiera de los|me da igual|sin preferencia|todos los|no importa (?:el|quien))\b/;
+export function requestedTimePreference(text:string):'earliest'|'latest'|null {
+  const value=normalized(text);
+  if(/\b(ultima hora|ultimos? (?:horarios?|turnos?)|(?:al |hacia el |sobre el )?final (?:de (?:la )?|del )(?:tarde|dia|jornada|manana)|(?:lo )?mas tarde(?: posible| que (?:se )?pueda)?|antes de cerrar|late afternoon|end of (?:the )?day)\b/.test(value))return 'latest';
+  if(/\b(primera hora|primeros? (?:horarios?|turnos?)|(?:al |hacia el )?(?:comienzo|inicio) (?:de (?:la )?|del )(?:manana|tarde|dia|jornada)|(?:lo )?mas temprano(?: posible)?|early morning)\b/.test(value))return 'earliest';
+  return null;
+}
 export function isCancellationRequest(text:string){
   const value=normalized(text);
   if(/\b(?:no (?:quiero |deseo |necesito |lo |la )?|sin |en vez de |do not |don't )cancel(?:ar|es|a)?\b/.test(value))return false;
@@ -63,14 +69,17 @@ export function isAvailabilityRequest(text:string,therapists:Therapist[],previou
   if(/\bcon\b/.test(value)&&!namesIn(value,therapists).length&&!therapists.some(t=>value.includes(normalized(t.specialty)))&&!anyTherapist.test(value)&&!/\bcon (?:quien sea|disponibilidad)\b/.test(value))return false;
   return /\b(turnos?|citas?|horarios?|disponibilidad|disponibles?|fisio|fisioterapia|kinesiologia|terapia fisica)\b/.test(value)&&/\b(quiero|quisiera|necesito|busco|buscar|ver|tenes|tienen|tendra|hay|disponibles?|disponibilidad|podrias|puedo|gustaria|sacar|reservar)\b/.test(value)
     || /^(?:y|o|mejor|solo)\b.*\b(?:la tarde|la manana|la noche)\b/.test(value)
-    || Boolean(previous&&refinement(value)&&! /\b(el de|la de|primero|segundo|tercero|ultimo|ese|este|sirve|elijo|confirmo)\b/.test(value));
+    || Boolean(previous&&(refinement(value)||requestedTimePreference(value))&&! /\b(el de|la de|primero|segundo|tercero|ultimo|ese|este|sirve|elijo|confirmo)\b/.test(value));
 }
 
 /** Unstated preferences cannot silently narrow a real database search. */
 export function normalizeAvailabilitySearch(filter:AvailabilityInput,text:string,now:string,timeZone:string,therapists:Therapist[],previous?:AvailabilityInput|null):AvailabilityInput {
   const value=normalized(text),today=Temporal.Instant.from(now).toZonedDateTimeISO(timeZone).toPlainDate();
-  const followup=(/^(?:y|o|mejor|solo|solamente)\b/.test(value.trim().replace(/^[¿¡]/,''))||refinement(value))&&previous;
+  const preference=requestedTimePreference(text);
+  const followup=(/^(?:y|o|mejor|solo|solamente)\b/.test(value.trim().replace(/^[¿¡]/,''))||refinement(value)||Boolean(preference&&!freshSearch.test(value)))&&previous;
   let result:AvailabilityInput={...filter};
+  result.time_preference=preference??(followup?previous.time_preference??null:null);
+  if(/\b(cualquier horario|a cualquier hora|sin preferencia de horari[oa])\b/.test(value))result.time_preference=null;
   const names=namesIn(value,therapists);
   if(anyTherapist.test(value))result.therapist_id=null;
   else if(names.length===1)result.therapist_id=names[0]!.id;
@@ -88,6 +97,7 @@ export function normalizeAvailabilitySearch(filter:AvailabilityInput,text:string
   }
   const periods=[/\b(?:la manana|las mananas|horario de manana|matutino|matutina)\b/.test(value),/\b(?:la tarde|las tardes|vespertino|vespertina)\b/.test(value),/\b(?:la noche|las noches|nocturno|nocturna)\b/.test(value)];
   if(requestedLocalTime(text)){
+    result.time_preference=null;
     // Exact start times are matched after fetching real slots, not as session end bounds.
     [result.not_before,result.not_after]=periods.filter(Boolean).length===1?(periods[0]?['00:00','12:00']:periods[1]?['13:00','20:00']:['20:00','23:59']):[null,null];
     return result;

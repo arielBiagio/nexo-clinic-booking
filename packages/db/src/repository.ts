@@ -130,10 +130,30 @@ export class ClinicRepository {
   }
 
   async getUnreadConversations(readerId:string) {
-    return (await this.db.query(`select c.id,count(m.id)::int as unread_count from public.conversations c
+    return (await this.db.query(`select c.id,1::int as unread_count from public.conversations c
       left join private.conversation_reads r on r.conversation_id=c.id and r.reader_id=$1
       join public.messages m on m.conversation_id=c.id and m.direction='inbound' and m.body is not null and m.sequence>coalesce(r.last_sequence,0)
-      where c.archived_at is null group by c.id`,[readerId])).rows;
+      where c.archived_at is null and c.status in ('handed_off','human_led') group by c.id`,[readerId])).rows;
+  }
+
+  async getAppointmentActivity(readerId:string,therapistScope?:string){
+    const scope=`($2::uuid is null or e.therapist_id=$2 or e.previous_therapist_id=$2 or e.starts_at is null and a.therapist_id=$2)`;
+    const items=(await this.db.query(`select e.id::text,e.appointment_id,e.kind,e.occurred_at,e.starts_at,e.previous_starts_at,
+      p.name as patient_name,t.name as therapist_name,previous.name as previous_therapist_name,r.activity_id is null as unread
+      from private.appointment_activity e join public.appointments a on a.id=e.appointment_id join public.patients p on p.id=e.patient_id
+      left join public.therapists t on t.id=e.therapist_id left join public.therapists previous on previous.id=e.previous_therapist_id
+      left join private.appointment_activity_reads r on r.activity_id=e.id and r.reader_id=$1
+      where ${scope} order by e.id desc limit 30`,[readerId,therapistScope??null])).rows;
+    const count=(await this.db.query(`select count(*)::int as total from private.appointment_activity e join public.appointments a on a.id=e.appointment_id
+      where ${scope} and not exists(select 1 from private.appointment_activity_reads r where r.activity_id=e.id and r.reader_id=$1)`,[readerId,therapistScope??null])).rows[0]!;
+    return {items,unreadCount:Number(count.total)};
+  }
+  async markAppointmentActivityRead(readerId:string,ids:string[]|null,therapistScope?:string){
+    await this.db.query(`insert into private.appointment_activity_reads(reader_id,activity_id)
+      select $1,e.id from private.appointment_activity e join public.appointments a on a.id=e.appointment_id
+      where ($2::bigint[] is null or e.id=any($2::bigint[])) and ($3::uuid is null or e.therapist_id=$3 or e.previous_therapist_id=$3 or e.starts_at is null and a.therapist_id=$3)
+      on conflict do nothing`,[readerId,ids,therapistScope??null]);
+    return {ok:true};
   }
   async markConversationRead(readerId:string,conversationId:string,lastMessageId:string) {
     const message=(await this.db.query(`select m.sequence from public.messages m join public.conversations c on c.id=m.conversation_id

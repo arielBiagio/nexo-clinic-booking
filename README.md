@@ -6,7 +6,7 @@
 - Alta de terapeutas con su perfil profesional, gestión de roles y desactivación de accesos.
 - Terapeutas: edición de su perfil y disponibilidad, creación y cancelación de reservas de su propia agenda.
 - Agenda semanal y diaria con filtros, búsqueda y reservas manuales sobre fichas existentes.
-- Asistente de reservas con lenguaje natural, consulta de disponibilidad y explicaciones con IA.
+- Asistente de reservas con lenguaje natural, consulta de disponibilidad, preferencias de primera/última hora y explicaciones con IA.
 - Selección de horarios y confirmación de reservas controladas por el backend.
 - Ficha del paciente con nombre, teléfono, seguro y resumen de información referida.
 - Bandeja de conversaciones, atención humana y reanudación del asistente.
@@ -14,7 +14,7 @@
 - Reservas por Telegram en chats privados de prueba, con botones y respuestas de recepción.
 - Reprogramación por chat o desde la agenda, conservando la reserva y los datos del paciente.
 - Cancelación por chat con elección del turno y confirmación explícita.
-- Contador de mensajes sin leer en la pestaña, con avisos del navegador opcionales.
+- Avisos por conversación con atención humana pendiente y campana con actividad de turnos.
 - Configuración de jornadas, descansos, duración de sesiones y ausencias.
 - Cancelación y restauración de turnos; archivo y recuperación de conversaciones.
 - Fichas y reservas compartidas en Supabase, con protección contra turnos superpuestos; modo local opcional.

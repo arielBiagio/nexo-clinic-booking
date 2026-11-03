@@ -437,10 +437,14 @@ export class DemoService {
           const ranked=exact.length?exact:exactTime?[...candidates].sort((a,b)=>{
             const distance=(slot:OfferedSlot)=>Math.abs(minute(slotTime(slot))-minute(exactTime));
             return distance(a)-distance(b)||Date.parse(a.start)-Date.parse(b.start);
+          }):filter?.time_preference==='latest'?[...candidates].sort((a,b)=>{
+            // Keep the nearest local day first, then use its latest real openings.
+            const day=(slot:OfferedSlot)=>Temporal.Instant.from(slot.start).toZonedDateTimeISO(clinic.time_zone).toPlainDate().toString();
+            return day(a).localeCompare(day(b))||minute(slotTime(b))-minute(slotTime(a));
           }):candidates;
           session.offered=ranked.slice(0,3);
           const limitation=exactStatus==='unavailable'?`A las ${exactTime} no hay turnos disponibles en el período consultado. `:'';
-          this.add(session, 'assistant', candidates.length ? `${limitation}${exactTime&&!exact.length?'Te muestro otros horarios disponibles en ese período':'Estos son los próximos horarios disponibles'}. Elegí el que te quede mejor:` : `${limitation}${complete?'No hay horarios que coincidan en el período consultado.':'No encontré horarios que coincidan en los resultados consultados.'} Podés buscar otros días o cambiar tus preferencias.`);
+          this.add(session, 'assistant', candidates.length ? `${limitation}${exactTime&&!exact.length?'Te muestro otros horarios disponibles en ese período':filter?.time_preference==='latest'?'Estos son los últimos horarios libres de la jornada en el período que pediste':filter?.time_preference==='earliest'?'Estos son los primeros horarios disponibles':'Estos son los próximos horarios disponibles'}. Elegí el que te quede mejor:` : `${limitation}${complete?'No hay horarios que coincidan en el período consultado.':'No encontré horarios que coincidan en los resultados consultados.'} Podés buscar otros días o cambiar tus preferencias.`);
           const variables:Record<string,string>={};
           if(exactTime)variables.requested_time=exactTime;
           if(filter?.date)variables.day=new Intl.DateTimeFormat('es-AR',{weekday:'long',day:'numeric',month:'long',timeZone:'UTC'}).format(new Date(`${filter.date}T12:00:00Z`));
@@ -451,6 +455,7 @@ export class DemoService {
             exact_time_status:exactStatus,offered_count:session.offered.length,matching_count:candidates.length,
             alternatives_to_exact_time:Boolean(exactTime&&!exact.length&&session.offered.length),
             therapist_scope:preferred?'specified therapist only':'all therapists',
+            time_preference:filter?.time_preference??null,
             period_start:fromDate.toString(),period_days:filter?.horizon_days??14,
             window_start:filter?.not_before??null,window_end:filter?.not_after??null,
             next_step:session.offered.length?'choose an appointment button':'change preferences or use the search-other-days button'},variables,

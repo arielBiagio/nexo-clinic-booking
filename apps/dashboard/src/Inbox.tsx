@@ -10,7 +10,7 @@ export function Inbox({data,selected,onSelect,onRefresh,notify,onDelete,onRemove
   const messages=useRef<HTMLDivElement>(null),textarea=useRef<HTMLTextAreaElement>(null),followLatest=useRef(true),lastConversation=useRef<string|null>(null);
   const drafts=useRef(new Map<string,string>());
   const lastRead=useRef('');
-  const cases=data.conversations.filter(c=>c.messageCount>0&&(tab==='all'||c.handoff_id));
+  const cases=data.conversations.filter(c=>c.messageCount>0&&(tab==='all'||c.handoff_id||c.status==='human_led'));
   const current=selected&&data.conversations.some(c=>c.id===selected)?selected:cases[0]?.id;
   useEffect(()=>{if(selected)setMobileDetailOpen(true);},[selected]);
   useEffect(()=>{
@@ -50,11 +50,11 @@ export function Inbox({data,selected,onSelect,onRefresh,notify,onDelete,onRemove
   const remove=async()=>{if(!chat||busy)return;setBusy(true);setError('');try{await onDelete(chat.id);setMobileDetailOpen(false);}catch(e){setError((e as Error).message);}finally{setBusy(false);}};
   return <section className={`inbox panel ${mobileDetailOpen?'show-conversation':''}`} aria-label="Conversaciones de recepción">
     <div className="inbox-list">
-      <div className="inbox-list-heading"><h2>Bandeja de recepción</h2><span className="count-badge">{data.conversations.filter(c=>c.handoff_id).length}</span></div>
-      <div className="inbox-tabs"><button className={tab==='pending'?'active':''} onClick={()=>{setTab('pending');const first=data.conversations.find(c=>c.handoff_id);if(first)onSelect(first.id);}}>Por atender</button><button className={tab==='all'?'active':''} onClick={()=>setTab('all')}>Todas</button></div>
+      <div className="inbox-list-heading"><h2>Bandeja de recepción</h2><span className="count-badge">{data.conversations.filter(c=>c.handoff_id||c.status==='human_led').length}</span></div>
+      <div className="inbox-tabs"><button className={tab==='pending'?'active':''} onClick={()=>{setTab('pending');const first=data.conversations.find(c=>c.handoff_id||c.status==='human_led');if(first)onSelect(first.id);}}>Por atender</button><button className={tab==='all'?'active':''} onClick={()=>setTab('all')}>Todas</button></div>
       <div className="inbox-cases">
         {!cases.length&&<div className="empty-inbox"><CheckCheck size={28}/><strong>Todo al día</strong><p>No hay conversaciones esperando.</p></div>}
-        {cases.map(c=><button key={c.id} disabled={busy} className={`conversation-item ${current===c.id?'selected':''}`} onClick={()=>{onSelect(c.id);setMobileDetailOpen(true);}}><span className="patient-avatar">{initials(c.patient_name)}</span><div><strong>{c.patient_name}</strong><p>{c.preview}</p><span>{c.handoff_id?'Necesita recepción':c.status==='human_led'?'Atención humana':'Asistente'}</span></div>{(unread[c.id]??0)>0?<span className="count-badge" aria-label={`${unread[c.id]} sin leer`}>{unread[c.id]}</span>:c.handoff_id&&<i className="unread-dot"/>}</button>)}
+        {cases.map(c=><button key={c.id} disabled={busy} className={`conversation-item ${current===c.id?'selected':''}`} onClick={()=>{onSelect(c.id);setMobileDetailOpen(true);}}><span className="patient-avatar">{initials(c.patient_name)}</span><div><strong>{c.patient_name}</strong><p>{c.preview}</p><span>{c.handoff_id?'Necesita recepción':c.status==='human_led'?'Atención humana':'Asistente'}</span></div>{(unread[c.id]??0)>0?<span className="count-badge" aria-label={`${unread[c.id]} sin leer`}>{unread[c.id]}</span>:null}</button>)}
       </div>
       <button className="removed-link" onClick={onRemoved}>Ver conversaciones eliminadas</button>
     </div>

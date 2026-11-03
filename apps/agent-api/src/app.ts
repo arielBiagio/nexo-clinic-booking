@@ -43,6 +43,7 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
         const route=pathname??'',method=request.method;
         let allowed=method==='GET'&&(['/v1/auth/me','/v1/dashboard','/v1/therapists','/v1/demo/removed/appointments','/v1/patients/search'].includes(route)||route==='/v1/availability'&&new URL(request.url,'http://local').searchParams.get('therapistId')===own);
         if(route===`/v1/therapists/${own}/profile`&&['GET','PATCH'].includes(method)||route===`/v1/therapists/${own}/schedule`&&['GET','PUT'].includes(method)||route===`/v1/therapists/${own}/time-off`&&method==='POST'||route.startsWith(`/v1/therapists/${own}/time-off/`)&&method==='DELETE'||route===`/v1/therapists/${own}/appointments`&&method==='POST')allowed=true;
+        if(own&&(route==='/v1/activity'&&method==='GET'||route==='/v1/activity/read'&&method==='POST'))allowed=true;
         const appointment=route.match(/^\/v1\/appointments\/([^/]+)(\/restore|\/reschedule)?$/);
         if(appointment&&(method==='DELETE'&&!appointment[2]||method==='POST'&&appointment[2])){
           const row=(await repository.db.query('select therapist_id from public.appointments where id=$1',[id.parse(appointment[1])])).rows[0];
@@ -94,6 +95,16 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
     return repository.searchPatients(input.q,request.staff?.role==='therapist'?request.staff.therapistId??undefined:undefined);
   });
   app.get('/v1/inbox/unread',request=>repository.getUnreadConversations(request.staff?.id??'local'));
+  app.get('/v1/activity',request=>{
+    if(request.staff?.role==='therapist'&&!request.staff.therapistId)throw new DomainError('FORBIDDEN',403);
+    return repository.getAppointmentActivity(request.staff?.id??'local',request.staff?.role==='therapist'?request.staff.therapistId??undefined:undefined);
+  });
+  app.post('/v1/activity/read',request=>{
+    if(request.staff?.role==='therapist'&&!request.staff.therapistId)throw new DomainError('FORBIDDEN',403);
+    const input=z.strictObject({ids:z.array(z.string().regex(/^\d{1,18}$/)).min(1).max(50).optional(),all:z.literal(true).optional()})
+      .refine(value=>Boolean(value.ids)!==Boolean(value.all)).parse(request.body);
+    return repository.markAppointmentActivityRead(request.staff?.id??'local',input.all?null:input.ids!,request.staff?.role==='therapist'?request.staff.therapistId??undefined:undefined);
+  });
   app.post('/v1/conversations/:id/read',request=>{
     const input=z.strictObject({lastMessageId:id}).parse(request.body);
     return repository.markConversationRead(request.staff?.id??'local',id.parse((request.params as {id:string}).id),input.lastMessageId);
