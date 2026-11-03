@@ -517,7 +517,9 @@ export class DemoService {
     const start = fromDate ? Temporal.PlainDate.from(fromDate) : anchor.subtract({ days: anchor.dayOfWeek - 1 });
     const from = start.toZonedDateTime(String(clinic.time_zone)).toInstant().toString();
     const to = start.add({ days: 7 }).toZonedDateTime(String(clinic.time_zone)).toInstant().toString();
-    const therapists = (await this.repository.getTherapists()).filter(t=>!therapistId||t.id===therapistId);
+    // Directory information is visible to staff; operational agendas retain their role scope.
+    const professionals=(await this.repository.getTherapists()).map(t=>({id:String(t.id),name:String(t.name),specialty:String(t.specialty)}));
+    const therapists = professionals.filter(t=>!therapistId||t.id===therapistId);
     const appointments = (await this.repository.db.query(`select a.id,a.starts_at,a.ends_at,a.therapist_id,a.conversation_id,a.version,p.name as patient_name,t.name as therapist_name
       from public.appointments a join public.patients p on p.id=a.patient_id join public.therapists t on t.id=a.therapist_id
       where a.status='confirmed' and a.starts_at >= $1 and a.starts_at < $2 and ($3::uuid is null or a.therapist_id=$3) order by a.starts_at`, [from,to,therapistId??null])).rows;
@@ -532,7 +534,7 @@ export class DemoService {
         preview: row.last_message ?? (row.intake_summary?'Ficha del paciente guardada':'Conversación'),
         messageCount: Number(row.message_count??0),
       }));
-    return { clinic, therapists, appointments, slots, conversations, weekStart: start.toString(), anchorDate: anchor.toString() };
+    return { clinic, therapists, professionals, appointments, slots, conversations, weekStart: start.toString(), anchorDate: anchor.toString() };
   }
 }
 
