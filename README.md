@@ -12,6 +12,7 @@
 - Bandeja de conversaciones, atención humana y reanudación del asistente.
 - Historial de mensajes y contexto de reservas persistentes, con protección contra mensajes duplicados.
 - Reservas por Telegram en chats privados de prueba, con botones y respuestas de recepción.
+- Comando /nuevo_paciente para iniciar pruebas con fichas independientes desde una cuenta de Telegram autorizada.
 - Reprogramación por chat o desde la agenda, conservando la reserva y los datos del paciente.
 - Cancelación por chat con elección del turno y confirmación explícita.
 - Avisos por conversación con atención humana pendiente y campana con actividad de turnos.

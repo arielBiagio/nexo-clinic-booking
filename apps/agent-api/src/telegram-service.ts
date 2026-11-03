@@ -12,8 +12,9 @@ interface Delivery extends Record<string,unknown>{id:string;user_id:string|numbe
 /** One durable consumer per bot. Only private chats invited with the test code are linked. */
 export class TelegramService {
   private readonly owner=randomUUID();
-  constructor(readonly db:Sql,readonly api:TelegramApi,readonly botId:number,private readonly testCode:string,private readonly model?:IntentModel){
+  constructor(readonly db:Sql,readonly api:TelegramApi,readonly botId:number,private readonly testCode:string,private readonly model?:IntentModel,private readonly testUserId:number|null=null){
     if(testCode.length<12)throw new Error('TELEGRAM_TEST_CODE must contain at least 12 characters');
+    if(testUserId!==null&&(!Number.isSafeInteger(testUserId)||testUserId<=0))throw new Error('TELEGRAM_TEST_USER_ID_INVALID');
   }
   async acquire(){
     await this.db.query('insert into private.telegram_bots(bot_id) values ($1) on conflict do nothing',[this.botId]);
@@ -67,6 +68,18 @@ export class TelegramService {
       await this.notice(db,chat.id,'Prueba de reservas: usá datos ficticios. Podés escribir qué día y franja horaria te convienen.');
       return empty;
     }
+    if(update.message&&/^\/nuevo_paciente(?:@\w+)?(?:\s|$)/i.test(text)){
+      if(userId!==this.testUserId)return {callback:'',notice:{userId,text:'Este comando solo está disponible para la cuenta autorizada de pruebas.'}};
+      if(!/^\/nuevo_paciente(?:@\w+)?$/i.test(text))return {callback:'',notice:{userId,text:'Para empezar con una ficha vacía, escribí /nuevo_paciente sin agregar datos.'}};
+      // The update cursor, archive, fresh identity and channel switch commit together.
+      // Prior bookings keep their original patient; never match the new trial by phone.
+      if(!peer.archived_at)await service.archive(peer.conversation_id,true);
+      await db.query(`update private.telegram_outbox set status='cancelled' where bot_id=$1 and user_id=$2 and status in ('pending','sending')`,[this.botId,userId]);
+      const next=await service.create(undefined,`bot:${this.botId}:user:${userId}:trial:${randomUUID()}`);
+      await db.query('update private.telegram_peers set conversation_id=$3 where bot_id=$1 and user_id=$2',[this.botId,userId,next.id]);
+      await this.notice(db,next.id,'Nueva prueba iniciada con una ficha vacía. La conversación anterior quedó archivada y sus reservas se conservan: podés cancelarlas desde la agenda. Podés pedir un turno indicando día y franja; para reservar te pediré nombre y teléfono.');
+      return empty;
+    }
     if(peer.archived_at){
       if(update.message&&/^\/start(?:@\w+)?(?:\s|$)/.test(text)){
         const next=await service.continueArchived(peer.conversation_id);
@@ -92,7 +105,7 @@ export class TelegramService {
     }else if(/^\/start(?:@\w+)?(?:\s|$)/.test(text)||/^\/help(?:@\w+)?$/.test(text)){
       await db.query('update public.conversations set pending_slot_id=null,pending_expires_at=null where id=$1',[peer.conversation_id]);
       await db.query(`update private.conversation_runtime set state=state||'{"cancellation":null,"rescheduling":null,"offered":[],"choices":[{"label":"Buscar horarios","action":"start"},{"label":"Cambiar un turno","action":"reschedule"},{"label":"Cancelar un turno","action":"cancel"},{"label":"Hablar con recepción","action":"human"}]}'::jsonb where conversation_id=$1`,[peer.conversation_id]);
-      await this.notice(db,peer.conversation_id,'Podés reservar indicando día y franja, pedir cambiar un turno o cancelar una reserva. Antes de cancelar te pediré que elijas el turno y confirmes. Para hablar con alguien, escribí «recepción».');
+      await this.notice(db,peer.conversation_id,'Podés reservar indicando día y franja, pedir cambiar un turno o cancelar una reserva. Antes de cancelar te pediré que elijas el turno y confirmes. Para hablar con alguien, escribí «recepción».'+(userId===this.testUserId?' Para empezar una prueba como paciente nuevo, escribí /nuevo_paciente.':''));
       return empty;
     }else if(!text||text.length>500){
       await this.notice(db,peer.conversation_id,'Por ahora puedo leer mensajes de texto de hasta 500 caracteres. Escribí qué día o franja horaria te conviene.');return empty;

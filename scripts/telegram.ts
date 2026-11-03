@@ -7,6 +7,10 @@ const required=(key:string)=>{const value=process.env[key]?.trim();if(!value)thr
 const api=new TelegramApi(required('TELEGRAM_BOT_TOKEN'));
 const code=required('TELEGRAM_TEST_CODE');
 if(code.length<12)throw new Error('TELEGRAM_TEST_CODE must contain at least 12 characters');
+const testMode=process.env.TELEGRAM_TEST_MODE==='true';
+if(testMode&&process.env.NODE_ENV==='production')throw new Error('TELEGRAM_TEST_MODE_NOT_ALLOWED_IN_PRODUCTION');
+const testUserId=testMode?Number(required('TELEGRAM_TEST_USER_ID')):null;
+if(testUserId!==null&&(!Number.isSafeInteger(testUserId)||testUserId<=0))throw new Error('TELEGRAM_TEST_USER_ID_INVALID');
 let close:(()=>Promise<void>)|undefined;
 try{
   const bot=await api.me(),webhook=await api.webhook();
@@ -17,7 +21,7 @@ try{
   const db=connectPostgres(required('DATABASE_URL'));close=()=>db.close();
   const key=process.env.OPENROUTER_API_KEY?.trim();
   const model=key&&process.env.OPENROUTER_ENABLED!=='false'?new OpenRouterModel(key,{model:process.env.OPENROUTER_MODEL?.trim()||'openai/gpt-4o-mini'}):undefined;
-  const service=new TelegramService(db,api,bot.id,code,model);
+  const service=new TelegramService(db,api,bot.id,code,model,testUserId);
   const controller=new AbortController();for(const signal of ['SIGINT','SIGTERM'] as const)process.once(signal,()=>controller.abort());
   await service.acquire();
   console.log(`Telegram @${bot.username}: prueba privada activa mediante long polling. Usá tu enlace de invitación para iniciar.`);
