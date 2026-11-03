@@ -61,3 +61,21 @@
 .activity-list li.activity-cancelled::before{background:#d68c86}
 .activity-expand{display:flex;justify-content:center;gap:20px;padding:11px 16px;border-top:1px solid var(--border);flex-shrink:0}
 .activity-expand button{color:var(--green);font-size:14px;background:none;border:0;padding:3px;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+
+/* Keep the header available while the agenda scrolls. */
+.topbar{position:sticky;top:0;z-index:18;background:#fff}
+.sidebar-user .settings-button{margin-left:auto;flex-shrink:0;color:#73877e;width:34px;height:34px}
+.preferences-content{padding:22px 24px 24px;display:grid;gap:20px}
+.preferences-intro{font-size:14px;color:#71837b;line-height:1.6;margin:0}
+.preference-group{border-bottom:1px solid var(--border);padding-bottom:20px;display:grid;gap:12px}
+.preference-toggle{display:flex;flex-direction:row;align-items:center;gap:12px;cursor:pointer}
+.preference-toggle>svg{flex-shrink:0;color:var(--green)}
+.preference-toggle>span{flex:1;min-width:0;display:grid;gap:5px}
+.preference-toggle strong{font-size:14px;color:#334a40;font-weight:600}
+.preference-toggle small{font-size:13px;font-weight:400;color:#71837b;line-height:1.5}
+.preference-toggle input{width:19px;height:19px;min-height:19px;margin:0;padding:0;accent-color:var(--green);flex-shrink:0;cursor:pointer}
+.preference-note{font-size:13px;color:#71837b;line-height:1.6;margin:0}
+.preference-sound{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding-left:31px}
+.preference-sound>span{font-size:13px;color:#71837b;line-height:1.5;flex:1;min-width:150px}
+.preferences-account{border-top:1px solid var(--border);padding-top:20px}
+@media(min-width:1051px){.agenda-rail{top:84px;max-height:calc(100dvh - 100px)}}

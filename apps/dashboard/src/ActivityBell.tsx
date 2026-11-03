@@ -6,13 +6,17 @@ type Movement={id:string;kind:'booked'|'rescheduled'|'cancelled'|'restored';occu
 type Feed={items:Movement[];unreadCount:number};
 const labels={booked:'Nuevo turno',rescheduled:'Turno reprogramado',cancelled:'Turno cancelado',restored:'Turno restaurado'};
 
-export function ActivityBell({zone,canNotify,permission,onRequestPermission}:{zone:string;canNotify:boolean;permission:NotificationPermission|'unsupported';onRequestPermission:()=>Promise<void>}){
+export function ActivityBell({zone,onNewActivity}:{zone:string;onNewActivity:()=>void}){
   const [open,setOpen]=useState(false),[feed,setFeed]=useState<Feed>({items:[],unreadCount:0}),[error,setError]=useState(''),[busy,setBusy]=useState(false);
   const [visibleCount,setVisibleCount]=useState(6);
   const root=useRef<HTMLDivElement>(null),trigger=useRef<HTMLButtonElement>(null),request=useRef(0),alive=useRef(true),reading=useRef(false);
+  const seen=useRef<Set<string>|null>(null),alertRef=useRef(onNewActivity);alertRef.current=onNewActivity;
   const refresh=useCallback(async()=>{
     const token=++request.current;
-    try{const next=await api<Feed>('/activity');if(alive.current&&token===request.current){setFeed(next);setError('');}}
+    try{const next=await api<Feed>('/activity');if(alive.current&&token===request.current){
+      if(seen.current!==null&&next.items.some(item=>item.unread&&!seen.current!.has(item.id)))alertRef.current();
+      seen.current=new Set(next.items.map(item=>item.id));setFeed(next);setError('');
+    }}
     catch{if(alive.current&&token===request.current)setError('No pudimos cargar la actividad.');}
   },[]);
   useEffect(()=>{alive.current=true;void refresh();const timer=setInterval(()=>void refresh(),10_000);window.addEventListener('focus',refresh);return()=>{alive.current=false;request.current++;clearInterval(timer);window.removeEventListener('focus',refresh);};},[refresh]);
@@ -46,7 +50,6 @@ export function ActivityBell({zone,canNotify,permission,onRequestPermission}:{zo
       <ul className="activity-list">{feed.items.slice(0,visibleCount).map(item=><li key={item.id} className={`activity-${item.kind}${item.unread?' activity-unread':''}`}><strong>{labels[item.kind]}</strong><span>{item.patient_name}</span>{item.starts_at&&<span>{when(item.starts_at)}{item.therapist_name?` · ${item.therapist_name}`:''}</span>}{item.previous_starts_at&&<small>Antes: {when(item.previous_starts_at)}{item.previous_therapist_name?` · ${item.previous_therapist_name}`:''}</small>}<time dateTime={item.occurred_at}>{when(item.occurred_at)}</time></li>)}</ul>
       {feed.items.length>6&&<div className="activity-expand">{visibleCount<feed.items.length&&<button onClick={()=>setVisibleCount(count=>count+6)}>Ver más</button>}{visibleCount>6&&<button onClick={()=>{setVisibleCount(6);root.current?.querySelector('.activity-list')?.scrollTo({top:0});}}>Ver menos</button>}</div>}
       {!feed.items.length&&!error&&<p className="activity-empty">Todavía no hay movimientos.</p>}
-      {canNotify&&permission!=='unsupported'&&permission!=='granted'&&<div className="activity-footer">{permission==='default'?<button onClick={()=>void onRequestPermission()}>Activar avisos de atención humana</button>:<span>Avisos bloqueados en el navegador</span>}</div>}
     </section>}
   </div>;
 }
