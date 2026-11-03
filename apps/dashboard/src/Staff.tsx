@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from './api';
 import type { StaffUser, Therapist } from './types';
+import { ProfessionalDirectory } from './ProfessionalDirectory';
+
+export function TeamDirectory({professionals}:{professionals:Therapist[]}){
+  return <section className="panel staff-panel"><h2>Profesionales</h2><ProfessionalDirectory professionals={professionals}/></section>;
+}
 
 interface Member extends Omit<StaffUser,'therapistId'> {active:boolean;therapist_id:string|null}
 const roleLabel={admin:'Administrador',reception:'Recepción',therapist:'Terapeuta'};
@@ -14,7 +19,7 @@ function MemberRow({member,therapists,onSaved,notify}:{member:Member;therapists:
     <button className="secondary-button" disabled={busy} onClick={()=>void save(!member.active)}>{member.active?'Desactivar':'Reactivar'}</button>
   </article>;
 }
-export function Staff({therapists,notify,onRefresh,focusCreate=0}:{therapists:Therapist[];notify:(text:string)=>void;onRefresh:()=>void;focusCreate?:number}){
+export function Staff({therapists,professionals=therapists,notify,onRefresh,focusCreate=0}:{therapists:Therapist[];professionals?:Therapist[];notify:(text:string)=>void;onRefresh:()=>void;focusCreate?:number}){
   const createForm=useRef<HTMLFormElement>(null);
   useEffect(()=>{if(focusCreate){createForm.current?.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'center'});createForm.current?.querySelector('input')?.focus({preventScroll:true});}},[focusCreate]);
   const [members,setMembers]=useState<Member[]>([]),[error,setError]=useState(''),[busy,setBusy]=useState(false);
@@ -25,8 +30,8 @@ export function Staff({therapists,notify,onRefresh,focusCreate=0}:{therapists:Th
     await api('/staff',{name:name.trim(),email:email.trim(),password,role,...(role==='therapist'?{specialty:specialty.trim()}:{})});
     setName('');setEmail('');setPassword('');setSpecialty('Fisioterapia');notify(role==='therapist'?'Terapeuta y acceso creados. Configurá sus horarios en Disponibilidad.':'Acceso creado. No se envió ningún correo.');onRefresh();await load();
   }catch(e){setError((e as Error).message);}finally{setBusy(false);}};
-  return <div className="staff-layout"><section className="panel staff-panel"><h2>Equipo y permisos</h2><p>Administración y recepción operan la clínica. Cada terapeuta consulta su propia agenda.</p>
-    {members.map(member=><MemberRow key={`${member.id}-${member.role}-${member.active}-${member.therapist_id}`} member={member} therapists={therapists} onSaved={()=>void load()} notify={notify}/>)}</section>
+  return <div className="staff-layout"><div className="staff-overview"><section className="panel staff-panel"><h2>Equipo y permisos</h2><p>Administración y recepción operan la clínica. Cada terapeuta consulta su propia agenda.</p>
+      {members.map(member=><MemberRow key={`${member.id}-${member.role}-${member.active}-${member.therapist_id}`} member={member} therapists={therapists} onSaved={()=>void load()} notify={notify}/>)}</section><TeamDirectory professionals={professionals}/></div>
     <section className="panel staff-panel"><h2>Crear acceso</h2><form ref={createForm} onSubmit={create} className="staff-form">
       <label>{role==='therapist'?'Nombre del terapeuta':'Nombre'}<input value={name} onChange={e=>setName(e.target.value)} required minLength={2} maxLength={70} autoComplete="off"/></label>
       <label>Correo<input type="email" value={email} onChange={e=>setEmail(e.target.value)} required maxLength={254} autoComplete="off"/></label>

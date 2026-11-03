@@ -7,7 +7,7 @@ const modes=[
   {theme:'dark',name:'Obsidiana',description:'Oscuro con acento turquesa',background:'#0c1013',surface:'#161d22',accent:'#7bced4',soft:'#222d34'},
 ] as const;
 
-export function AppearancePicker({appearance,onPreview}:{appearance:AppearanceSettings;onPreview:()=>void}){
+export function AppearancePicker({appearance}:{appearance:AppearanceSettings}){
   return <section className="preference-group appearance-picker" aria-labelledby="appearance-heading">
     <div className="appearance-heading"><Palette size={19}/><h3 id="appearance-heading">Apariencia</h3></div>
     <p className="preference-note">Elegí entre modo claro y oscuro.</p>
@@ -19,6 +19,5 @@ export function AppearancePicker({appearance,onPreview}:{appearance:AppearanceSe
         <strong>{palette.name}</strong><small>{palette.description}</small>
       </button>;
     })}</div>
-    <button className="secondary-button" onClick={onPreview}>Ver en el panel</button>
   </section>;
 }

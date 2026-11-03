@@ -121,3 +121,5 @@
 .professional-directory strong{font-size:14.5px;font-weight:600;line-height:1.5}
 .professional-directory p{font-size:13.5px;color:var(--text-secondary,#71837b);line-height:1.5;margin-top:4px}
 .professional-directory-empty{display:grid;justify-items:center;gap:10px;padding:30px 0;color:var(--muted)}
+
+.staff-overview{display:grid;gap:22px;align-content:start;min-width:0}.staff-panel>.professional-directory{padding:8px 0 0}

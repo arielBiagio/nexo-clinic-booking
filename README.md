@@ -15,10 +15,11 @@
 - Comando /nuevo_paciente para iniciar pruebas con fichas independientes desde una cuenta de Telegram autorizada.
 - Reprogramación por chat o desde la agenda, conservando la reserva y los datos del paciente.
 - Cancelación por chat con elección del turno y confirmación explícita.
+- Reservas de una semana al mismo horario, con revisión de cada fecha, contacto y confirmación del conjunto.
 - Avisos por conversación con atención humana pendiente y campana con actividad de turnos.
 - Ajustes personales de notificaciones del navegador y sonidos, con acceso para cerrar sesión.
 - Modo claro y oscuro Obsidiana, con preferencia guardada.
-- Transiciones ligeras en botones y cuadros, con movimiento reducido según el sistema.
+- Animaciones breves de navegación y entradas escalonadas, con movimiento reducido según el sistema.
 - Accesos rápidos para crear turnos o administrar accesos del equipo.
 - Configuración de jornadas, descansos, duración de sesiones y ausencias.
 - Cancelación y restauración de turnos; archivo y recuperación de conversaciones.

@@ -3,6 +3,7 @@ import { calendarHints } from './calendar.js';
 import { isAvailabilityRequest,isRescheduleRequest,isCancellationRequest } from './search.js';
 import { bookingGuidelines } from './booking-prompt.js';
 import { narrationPrompt, type NarrationContext } from './narration.js';
+import { isWeeklyBookingRequest,weeklyInput,type WeeklyInput } from './weekly.js';
 
 export const handoffReason = z.enum(['requested_human','not_understood','clinical','billing','exception','tool_failure']);
 export const availabilityInput = z.strictObject({
@@ -17,6 +18,7 @@ export type AvailabilityInput = z.infer<typeof availabilityInput>;
 const patientInput=z.strictObject({name:z.string().min(2).max(70).nullable(),phone:z.string().max(40).nullable(),insurance:z.string().max(120).nullable(),reported_reason:z.string().max(400).nullable(),additional_info:z.string().max(600).nullable()});
 export type AgentDecision =
   | {kind:'availability';filter:AvailabilityInput}
+  | {kind:'weekly';request:WeeklyInput}
   | {kind:'reschedule';appointmentId:string|null;filter:AvailabilityInput}
   | {kind:'cancel';appointmentId:string|null}
   | {kind:'select';slotId:string}
@@ -34,6 +36,7 @@ export interface AgentContext {
   appointments?:{id:string;therapistId:string;therapistName:string;start:string;end:string;version:number}[];
   rescheduling?:{id:string;version:number}|null;
   search?:AvailabilityInput|null;
+  weeklyRequest?:WeeklyInput|null;
   history:{role:'patient'|'assistant'|'staff';text:string}[];
 }
 export interface IntentModel {
@@ -47,6 +50,10 @@ export class ProviderError extends Error {
 }
 
 const definitions = [
+  {name:'prepare_weekly_booking',description:'Consultar y preparar turnos a la misma hora durante una sola semana, antes o después de una reserva. No confirma nada. week_start es una fecha de esa semana o null si falta; local_time HH:MM o null si falta. weekdays ISO lunes=1..domingo=7, null para días de atención configurados. reference_appointment_id solo de appointments si pide el mismo horario/semana de un turno previo. therapist_id null si no tiene preferencia. El backend comprueba todas las fechas, conserva los turnos ya existentes y solicita contacto y confirmación nueva.',parameters:{type:'object',additionalProperties:false,properties:{
+    week_start:{type:['string','null']},local_time:{type:['string','null']},therapist_id:{type:['string','null']},
+    weekdays:{type:['array','null'],items:{type:'integer',minimum:1,maximum:7},minItems:1,maxItems:7},reference_appointment_id:{type:['string','null']},
+  },required:['week_start','local_time','therapist_id','weekdays','reference_appointment_id']}},
   {name:'update_patient_details',description:'Guardar o corregir datos explícitos del último mensaje del paciente, incluso después de reservar. Priorizá esta herramienta si aporta su nombre/teléfono u otros datos. Copiá fragmentos exactos; null significa no informado (conservar valor anterior). No inventar, diagnosticar ni interpretar síntomas.',parameters:{type:'object',additionalProperties:false,properties:{
     name:{type:['string','null'],description:'Nombre proporcionado por el paciente.'},phone:{type:['string','null'],description:'Teléfono tal como lo escribió; no agregar prefijos.'},
     insurance:{type:['string','null'],description:'Seguro u obra social que declara.'},reported_reason:{type:['string','null'],description:'Motivo o diagnóstico que refiere, sin validación clínica.'},
@@ -118,7 +125,8 @@ export class OpenRouterModel implements IntentModel {
     const latest=context.history.filter(m=>m.role==='patient').at(-1)?.text??'';
     const moving=isRescheduleRequest(latest);
     const cancelling=!moving&&isCancellationRequest(latest);
-    const searching=!moving&&!cancelling&&isAvailabilityRequest(latest,context.therapists,context.search);
+    const weekly=!moving&&!cancelling&&isWeeklyBookingRequest(latest);
+    const searching=!weekly&&!context.weeklyRequest&&!moving&&!cancelling&&isAvailabilityRequest(latest,context.therapists,context.search);
     const system = `${bookingGuidelines}
 
 REGLAS DE INTEGRACIÓN CON NEXO
@@ -137,10 +145,11 @@ Elegí una sola herramienta por mensaje. get_availability consulta; select_slot 
 El backend muestra los horarios y las confirmaciones con datos reales. No escribas horas concretas ni afirmes reservas por tu cuenta.
 “A última hora”, “al final de la tarde” o “a primera hora” son preferencias de orden: consultá el día/franja indicado sin inventar una hora de cierre ni pedir una hora exacta. El backend ordena los turnos reales de la disponibilidad configurada.
 Un horario no se reserva hasta que el paciente confirma explícitamente después de seleccionarlo. Nunca uses sí/confirmo de un turno anterior.
+Reservas semanales: «toda una semana», «todos los días» o «lunes a viernes a la misma hora» usan prepare_weekly_booking, también después de confirmar un turno. Para «al mismo horario» usá una reserva inequívoca de appointments como referencia; si hay varias y no se sabe cuál, pedí aclaración. Sin referencia ni semana, week_start=null; sin hora, local_time=null. Usá calendar.followingWeek para la semana que viene. null weekdays usa los días de atención configurados; no inventes días ni cambies profesional silenciosamente. weeklyRequest conserva preferencias de la consulta semanal; completalas con prepare_weekly_booking cuando responda con semana/hora/profesional. Si aporta nombre/teléfono usá update_patient_details y el backend retoma el resumen semanal. La consulta no reserva: necesita un resumen con fechas, hora, profesional, contacto y una confirmación nueva; un sí de un turno previo no vale. No uses select_slot ni book_selected_slot para una semana. Una semana requiere todas las fechas propuestas; un conflicto no autoriza reservas parciales.
 Para consultas ambiguas, pedí una aclaración. Un saludo puede responderse directamente. No inventes IDs.
 Para cambiar día u horario de una cita existente usá get_reschedule_availability. appointments lista solo reservas futuras del paciente. Conservá el terapeuta original si no pide otro. Si hay varias citas y no identifica cuál, appointment_id=null: el backend le preguntará. La cita original sigue confirmada hasta que elige y confirma el cambio. En modo rescheduling las siguientes búsquedas y selecciones ajustan ese mismo cambio, no crean una reserva nueva. Para cancelar usá prepare_cancellation: el backend pide identificar la cita y confirmar la cancelación; nunca afirmes que ya fue cancelada antes de ese resultado. No solicites datos clínicos.
 La fecha actual incluye zona horaria. Usá calendar.nextWeekdays para días de la semana y calendar.followingWeek si se pide la semana que viene; no calcules esas fechas de memoria.
-Contexto actual (JSON del backend): ${JSON.stringify({now:context.now,timeZone:context.timeZone,calendar:calendarHints(context.now,context.timeZone),clinicName:context.clinicName,therapists:context.therapists,offered:context.offered,selectedSlotId:context.selectedSlotId,patient:context.patient,hasAppointment:context.hasAppointment,appointments:context.appointments,rescheduling:context.rescheduling,previousSearch:context.search})}`;
+Contexto actual (JSON del backend): ${JSON.stringify({now:context.now,timeZone:context.timeZone,calendar:calendarHints(context.now,context.timeZone),clinicName:context.clinicName,therapists:context.therapists,offered:context.offered,selectedSlotId:context.selectedSlotId,patient:context.patient,hasAppointment:context.hasAppointment,appointments:context.appointments,rescheduling:context.rescheduling,previousSearch:context.search,weeklyRequest:context.weeklyRequest})}`;
     let response:Response;
     try {
       response=await this.transport('https://openrouter.ai/api/v1/chat/completions',{
@@ -151,8 +160,8 @@ Contexto actual (JSON del backend): ${JSON.stringify({now:context.now,timeZone:c
         // over accompanying suggestions. No parallel mutation is executed.
         body:JSON.stringify({model:this.model,temperature:0.1,max_tokens:450,stream:false,
           messages:[{role:'system',content:system},...context.history.slice(-24).map(m=>({role:m.role==='patient'?'user':'assistant',content:m.role==='staff'?`Recepción: ${m.text}`:m.text}))],
-          tools:definitions.filter(d=>moving?d.name==='get_reschedule_availability':cancelling?d.name==='prepare_cancellation':!searching||d.name==='get_availability').map(definition=>({type:'function',function:{...definition,strict:true}})),
-          tool_choice:moving?{type:'function',function:{name:'get_reschedule_availability'}}:cancelling?{type:'function',function:{name:'prepare_cancellation'}}:searching?{type:'function',function:{name:'get_availability'}}:'auto',provider:{require_parameters:true}}),
+          tools:definitions.filter(d=>moving?d.name==='get_reschedule_availability':cancelling?d.name==='prepare_cancellation':weekly?d.name==='prepare_weekly_booking':!searching||d.name==='get_availability').map(definition=>({type:'function',function:{...definition,strict:true}})),
+          tool_choice:moving?{type:'function',function:{name:'get_reschedule_availability'}}:cancelling?{type:'function',function:{name:'prepare_cancellation'}}:weekly?{type:'function',function:{name:'prepare_weekly_booking'}}:searching?{type:'function',function:{name:'get_availability'}}:'auto',provider:{require_parameters:true}}),
         signal:AbortSignal.timeout(this.timeoutMs),
       });
     }catch{throw new ProviderError('UNAVAILABLE');}
@@ -194,6 +203,7 @@ Contexto actual (JSON del backend): ${JSON.stringify({now:context.now,timeZone:c
       const args:unknown=JSON.parse(call.function.arguments);
       switch(call.function.name){
         case 'update_patient_details':return {kind:'patient',details:patientInput.parse(args)};
+        case 'prepare_weekly_booking':return {kind:'weekly',request:weeklyInput.parse(args)};
         case 'get_availability':return {kind:'availability',filter:availabilityInput.parse(args)};
         case 'get_reschedule_availability':{
           const {appointment_id,...filter}=z.strictObject({...availabilityInput.shape,appointment_id:z.uuid().nullable()}).parse(args);

@@ -1,5 +1,5 @@
 :root{--motion-fast:80ms;--motion-normal:120ms;--motion-ease:cubic-bezier(.2,.7,.2,1)}
-/* Keep feedback local: navigation, cards and messages are visible immediately. */
+/* Short transitions never delay the underlying actions. */
 button{transition:background-color 80ms ease,color 80ms ease,border-color 80ms ease,transform 70ms ease}
 .sidebar{transition:transform 120ms var(--motion-ease)}
 .sidebar-navigation{min-width:0;overflow-x:hidden}
@@ -18,6 +18,23 @@ button{transition:background-color 80ms ease,color 80ms ease,border-color 80ms e
 @keyframes appDialogIn{from{opacity:.6;transform:translateY(4px)}to{opacity:1;transform:none}}
 @keyframes appDrawerIn{from{opacity:.6;transform:translateX(8px)}to{opacity:1;transform:none}}
 @keyframes appPopoverIn{from{opacity:.6;transform:translateY(-3px)}to{opacity:1;transform:none}}
+/* Re-enter sections without remounting their content or delaying interactions. */
+.main-shell>main{animation-duration:150ms;animation-timing-function:var(--motion-ease)}
+.main-shell>main[data-page=agenda]{animation-name:pageAgenda}
+.main-shell>main[data-page=inbox]{animation-name:pageInbox}
+.main-shell>main[data-page=schedule]{animation-name:pageSchedule}
+.main-shell>main[data-page=team]{animation-name:pageTeam}
+.main-shell>main[data-page=profile]{animation-name:pageProfile}
+.stats-grid>.stat-card{animation:cardArrival 180ms var(--motion-ease) backwards}
+.stats-grid>.stat-card:nth-child(2){animation-delay:20ms}.stats-grid>.stat-card:nth-child(3){animation-delay:40ms}.stats-grid>.stat-card:nth-child(4){animation-delay:60ms}
+.chat-message{animation:messageArrival 120ms ease-out}
+@keyframes pageAgenda{from{opacity:.8;transform:translateY(4px)}to{opacity:1;transform:none}}
+@keyframes pageInbox{from{opacity:.8;transform:translateY(4px)}to{opacity:1;transform:none}}
+@keyframes pageSchedule{from{opacity:.8;transform:translateY(4px)}to{opacity:1;transform:none}}
+@keyframes pageTeam{from{opacity:.8;transform:translateY(4px)}to{opacity:1;transform:none}}
+@keyframes pageProfile{from{opacity:.8;transform:translateY(4px)}to{opacity:1;transform:none}}
+@keyframes cardArrival{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+@keyframes messageArrival{from{opacity:.75;transform:translateY(3px)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){
  *,*::before,*::after{animation-duration:.01ms!important;animation-delay:0ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
 }

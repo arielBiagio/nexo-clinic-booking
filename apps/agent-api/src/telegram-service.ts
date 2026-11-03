@@ -104,7 +104,7 @@ export class TelegramService {
       input={messageId,action:choice.action,...(choice.slotId?{slotId:choice.slotId}:{}),...(choice.appointmentId?{appointmentId:choice.appointmentId}:{})};
     }else if(/^\/start(?:@\w+)?(?:\s|$)/.test(text)||/^\/help(?:@\w+)?$/.test(text)){
       await db.query('update public.conversations set pending_slot_id=null,pending_expires_at=null where id=$1',[peer.conversation_id]);
-      await db.query(`update private.conversation_runtime set state=state||'{"cancellation":null,"rescheduling":null,"offered":[],"choices":[{"label":"Buscar horarios","action":"start"},{"label":"Cambiar un turno","action":"reschedule"},{"label":"Cancelar un turno","action":"cancel"},{"label":"Hablar con recepción","action":"human"}]}'::jsonb where conversation_id=$1`,[peer.conversation_id]);
+      await db.query(`update private.conversation_runtime set state=state||'{"cancellation":null,"rescheduling":null,"weekly":null,"offered":[],"choices":[{"label":"Buscar horarios","action":"start"},{"label":"Cambiar un turno","action":"reschedule"},{"label":"Cancelar un turno","action":"cancel"},{"label":"Hablar con recepción","action":"human"}]}'::jsonb where conversation_id=$1`,[peer.conversation_id]);
       await this.notice(db,peer.conversation_id,'Podés reservar indicando día y franja, pedir cambiar un turno o cancelar una reserva. Antes de cancelar te pediré que elijas el turno y confirmes. Para hablar con alguien, escribí «recepción».'+(userId===this.testUserId?' Para empezar una prueba como paciente nuevo, escribí /nuevo_paciente.':''));
       return empty;
     }else if(!text||text.length>500){

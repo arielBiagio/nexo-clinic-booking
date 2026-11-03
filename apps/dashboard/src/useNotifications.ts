@@ -41,7 +41,7 @@ export function useNotifications(userId:string){
       const start=context.currentTime;
       for(const [offset,frequency] of [[0,660],[0.12,880]] as const){
         const oscillator=context.createOscillator(),gain=context.createGain();oscillator.type='sine';oscillator.frequency.value=frequency;
-        gain.gain.setValueAtTime(0,start+offset);gain.gain.linearRampToValueAtTime(0.045,start+offset+0.015);gain.gain.exponentialRampToValueAtTime(0.0001,start+offset+0.17);
+        gain.gain.setValueAtTime(0,start+offset);gain.gain.linearRampToValueAtTime(0.13,start+offset+0.015);gain.gain.exponentialRampToValueAtTime(0.0001,start+offset+0.17);
         oscillator.connect(gain);gain.connect(context.destination);oscillator.start(start+offset);oscillator.stop(start+offset+0.19);
         oscillator.onended=()=>{oscillator.disconnect();gain.disconnect();};
       }
@@ -50,10 +50,9 @@ export function useNotifications(userId:string){
   },[]);
   const setSound=async(enabled:boolean)=>{
     setError('');
-    if(enabled&&!await unlock()){setError('El navegador no permitió el sonido. Volvé a activarlo desde este botón.');return;}
+    if(enabled&&!await unlock()){setError('El navegador no permitió el sonido. Volvé a activar la opción de sonido.');return;}
     setPreferences(value=>({...value,sound:enabled}));if(enabled)chime(true);
   };
-  const previewSound=async()=>{setError('');if(await unlock())chime(true);else setError('No pudimos reproducir el sonido en este navegador.');};
   const setNotifications=async(enabled:boolean)=>{
     setError('');
     if(!enabled){setPreferences(value=>({...value,notifications:false}));return;}
@@ -70,7 +69,7 @@ export function useNotifications(userId:string){
     }catch{/* The bell and conversation badge remain available. */}
   },[chime]);
   const onActivity=useCallback(()=>announce('activity'),[announce]),onAttention=useCallback(()=>announce('attention'),[announce]);
-  return {permission,notificationsEnabled:preferences.notifications&&permission==='granted',soundEnabled:preferences.sound,soundReady,soundSupported,error,setNotifications,setSound,previewSound,onActivity,onAttention};
+  return {permission,notificationsEnabled:preferences.notifications&&permission==='granted',soundEnabled:preferences.sound,soundReady,soundSupported,error,setNotifications,setSound,onActivity,onAttention};
 }
 
 export type NotificationSettings=ReturnType<typeof useNotifications>;

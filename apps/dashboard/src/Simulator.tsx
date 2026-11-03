@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, Bot, CircleCheck, Headphones, RotateCcw, Sparkles,Trash2 } from 'lucide-react';
+import { ArrowUp, Bot, CircleCheck, Headphones, RotateCcw,Trash2 } from 'lucide-react';
 import type { Chat, Choice } from './types';
 import { api } from './api';
 import { PatientCard } from './PatientCard';
@@ -22,7 +22,6 @@ export function Simulator({chat,setChat,onChange,onInbox,onDelete}:{chat:Chat|nu
   const restart=async()=>{setBusy(true);try{const next=await api<Chat>('/demo/conversations',{});sessionStorage.setItem('nexo-demo-chat',next.id);setChat(next);setError('');onChange();}catch(e){setError((e as Error).message);}finally{setBusy(false);}};
   const remove=async()=>{if(!chat||busy)return;setBusy(true);setError('');try{await onDelete(chat.id);await restart();}catch(e){setError((e as Error).message);}finally{setBusy(false);}};
   return <div className="simulator">
-    <div className="sim-intro"><span className="sim-intro-icon"><Sparkles size={20}/></span><div><strong>Ponete del lado del paciente</strong><p>Probá una reserva o pedí ayuda. Los cambios aparecen en la agenda y la bandeja.</p></div></div>
     <div className="chat-person"><span className="assistant-avatar"><Bot size={20}/></span><div><strong>Asistente de Clínica Demo</strong><span><i/>{chat?.status==='active'?(usesAI?`${modelLabel} · OpenRouter`:'Recorrido guiado de prueba'):'Conversación con recepción'}</span></div><button className="icon-button" aria-label="Nueva conversación de prueba" onClick={()=>void restart()} disabled={busy}><RotateCcw size={17}/></button><button className="icon-button danger-icon" aria-label="Eliminar esta conversación de prueba" title="Eliminar conversación" onClick={()=>void remove()} disabled={busy||!chat}><Trash2 size={17}/></button></div>
     {chat?.ai?.error&&<div className="chat-connection-error" role="alert"><p>{connectionIssue[chat.ai.error]??'El asistente no está disponible.'} {chat.status==='active'?'Podés continuar con los botones disponibles.':'Este caso quedó en recepción.'}</p><button className="secondary-button full" disabled={busy} onClick={()=>void restart()}><RotateCcw size={14}/>Nueva prueba con IA</button></div>}
     {chat&&<details className="sim-patient"><summary>Mis datos · {chat.patient.name_collected?chat.patient.name:'nombre pendiente'} · {chat.patient.phone?'teléfono guardado':'teléfono pendiente'}</summary><PatientCard conversationId={chat.id} onSaved={()=>{void api<Chat>(`/demo/conversations/${chat.id}`).then(setChat);onChange();}}/></details>}
@@ -30,7 +29,7 @@ export function Simulator({chat,setChat,onChange,onInbox,onDelete}:{chat:Chat|nu
       {!chat&&<div className="loading-note">Preparando tu conversación…</div>}
       {chat?.messages.map(message=><div key={message.id} className={`chat-message ${message.role}`}><span className="message-author">{message.role==='patient'?'Vos, como paciente':message.role==='staff'?'Recepción':'Asistente'}</span><p>{message.text}</p></div>)}
       {busy&&<div className="typing-dots"><i/><i/><i/></div>}
-      {!!chat?.choices.length&&<div className="chat-choices">{chat.choices.map((choice,i)=><button key={`${choice.action}-${i}`} disabled={busy} onClick={()=>void send(choice)}>{choice.action==='confirm'&&<CircleCheck size={14}/>} {choice.label}</button>)}</div>}
+      {!!chat?.choices.length&&<div className="chat-choices">{chat.choices.map((choice,i)=><button key={`${choice.action}-${i}`} disabled={busy} onClick={()=>void send(choice)}>{(choice.action==='confirm'||choice.action==='confirm_week')&&<CircleCheck size={14}/>} {choice.label}</button>)}</div>}
       {chat&&chat.status!=='active'&&<div className="handoff-chat-note"><Headphones size={17}/><span>La conversación quedó en manos de recepción.</span><button onClick={()=>onInbox(chat.id)}>Ver en la bandeja →</button></div>}
       <div ref={bottom}/>
     </div>

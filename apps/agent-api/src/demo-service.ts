@@ -7,13 +7,15 @@ import { normalizeAvailabilitySearch, requestedLocalTime, offeredSelection, reje
 import { requestedLocalDate } from '../../../packages/agent/src/calendar.js';
 import { renderNarration, type NarrationContext } from '../../../packages/agent/src/narration.js';
 import { groundedPatientPatch, missingContact, explicitPatientInfo,type PatientDetails } from '../../../packages/core/src/patient.js';
+import { isWeeklyConfirmation,type WeeklyInput } from '../../../packages/agent/src/weekly.js';
+import { proposeWeekly,bookWeekly,type WeeklyState } from './weekly-booking.js';
 
 export interface DemoMessage { id: string; role: 'patient' | 'assistant' | 'staff'; text: string; at: string }
-export type ChatAction='start'|'more'|'select'|'confirm'|'human'|'reschedule'|'cancel'|'confirm_cancel'|'keep';
+export type ChatAction='start'|'more'|'select'|'confirm'|'human'|'reschedule'|'cancel'|'confirm_cancel'|'keep'|'confirm_week'|'discard_week';
 export interface DemoChoice { label: string; action: ChatAction; slotId?: string;appointmentId?:string }
 interface UpcomingAppointment {id:string;therapistId:string;therapistName:string;start:string;end:string;version:number}
 export interface ChatView {id:string;status:string;name:string;messages:DemoMessage[];choices:DemoChoice[];patient:PatientDetails;hasAppointment:boolean;appointments:UpcomingAppointment[];ai:{provider:string;model:string|null;error:string|null}}
-interface Session { messages: DemoMessage[]; choices: DemoChoice[]; selected: string | null; processed: Set<string>; offered:OfferedSlot[]; modelRequests:number;modelWindowStart:number; clarificationCount:number; providerError:string|null;search:AvailabilityInput|null;rescheduling:{id:string;version:number}|null;cancellation:{id:string;version:number;expiresAt:number}|null }
+interface Session { messages: DemoMessage[]; choices: DemoChoice[]; selected: string | null; processed: Set<string>; offered:OfferedSlot[]; modelRequests:number;modelWindowStart:number; clarificationCount:number; providerError:string|null;search:AvailabilityInput|null;rescheduling:{id:string;version:number}|null;cancellation:{id:string;version:number;expiresAt:number}|null;weekly:WeeklyState|null }
 type StoredSession = Omit<Session,'messages'|'selected'|'processed'> & {processed:string[]; inputs:[string,string][]};
 export interface ChatInput { messageId: string; text?: string | undefined; action?: ChatAction|undefined; slotId?: string | undefined;appointmentId?:string|undefined }
 
@@ -34,7 +36,7 @@ export class DemoService {
       'select id,role,body,created_at from public.messages where conversation_id=$1 and body is not null order by sequence',[id])).rows.map(row=>({id:row.id,role:row.role,text:row.body,at:new Date(row.created_at).toISOString()}));
     const session:Session={messages,choices:stored?.choices??[{label:'Buscar horarios',action:'start'},{label:'Hablar con recepción',action:'human'}],
       selected:pending,processed:new Set(stored?.processed??[]),offered:stored?.offered??[],modelRequests:expired?0:stored?.modelRequests??0,modelWindowStart:expired?Date.now():windowStart,
-      clarificationCount:stored?.clarificationCount??0,providerError:expired&&stored?.providerError==='RATE_LIMIT'?null:stored?.providerError??null,search:stored?.search??null,rescheduling:stored?.rescheduling??null,cancellation:stored?.cancellation??null};
+      clarificationCount:stored?.clarificationCount??0,providerError:expired&&stored?.providerError==='RATE_LIMIT'?null:stored?.providerError??null,search:stored?.search??null,rescheduling:stored?.rescheduling??null,cancellation:stored?.cancellation??null,weekly:stored?.weekly??null};
     for(const [key,value] of stored?.inputs??[])this.inputs.set(key,value);
     this.sessions.set(id,session);
     return session;
@@ -144,6 +146,7 @@ export class DemoService {
     if(!session){
       session=await this.loadSession(id,row.pending_slot_id?String(row.pending_slot_id):null);
     }
+    if(row.status!=='active')session.weekly=null;
     const appointments=(await this.repository.getUpcomingAppointments(id)).map(a=>({id:a.id,therapistId:a.therapist_id,therapistName:a.therapist_name,start:new Date(a.starts_at).toISOString(),end:new Date(a.ends_at).toISOString(),version:a.version}));
     if(session.cancellation&&(session.cancellation.expiresAt<=Date.now()||!appointments.some(a=>a.id===session.cancellation!.id&&a.version===session.cancellation!.version))){
       session.cancellation=null;session.choices=[{label:'Revisar mis turnos para cancelar',action:'cancel'},{label:'Hablar con recepción',action:'human'}];
@@ -162,6 +165,7 @@ export class DemoService {
   }
 
   private async prepareReschedule(id:string,session:Session,current:ChatView,appointmentId:string|null,filter:AvailabilityInput|null) {
+    session.weekly=null;
     session.cancellation=null;
     const target=appointmentId?current.appointments.find(a=>a.id===appointmentId):current.appointments.length===1?current.appointments[0]:null;
     session.selected=null;session.offered=[];
@@ -178,6 +182,7 @@ export class DemoService {
   }
 
   private async prepareCancellation(id:string,session:Session,current:ChatView,appointmentId:string|null,text:string){
+    session.weekly=null;
     session.cancellation=null;session.rescheduling=null;session.selected=null;session.offered=[];session.providerError=null;
     await this.repository.db.query('update public.conversations set pending_slot_id=null,pending_expires_at=null where id=$1',[id]);
     const zone=(await this.repository.db.query<{time_zone:string}>('select time_zone from public.clinics')).rows[0]!.time_zone;
@@ -200,6 +205,44 @@ export class DemoService {
     session.choices=[{label:'Sí, cancelar este turno',action:'confirm_cancel'},{label:'Cambiar de horario',action:'reschedule',appointmentId:target.id},{label:'Mantener el turno',action:'keep'}];
   }
 
+  private async prepareWeekly(id:string,session:Session,current:ChatView,request:WeeklyInput,text:string){
+    const previous=session.weekly?.request;
+    session.cancellation=null;session.rescheduling=null;session.selected=null;session.offered=[];session.search=null;
+    await this.repository.db.query('update public.conversations set pending_slot_id=null,pending_expires_at=null where id=$1',[id]);
+    try{
+      const result=await proposeWeekly(this.repository,current,request,text,previous);
+      session.weekly=result.state;this.add(session,'assistant',result.message);
+      if(result.state.plan&&!result.state.plan.slots.length)session.weekly=null;
+      session.choices=[...(session.weekly?.ready?[{label:'Confirmar los turnos de la semana',action:'confirm_week'} as DemoChoice]:[]),
+        ...(session.weekly?[{label:'Descartar esta propuesta',action:'discard_week'} as DemoChoice]:[{label:'Buscar horarios',action:'start'} as DemoChoice]),{label:'Hablar con recepción',action:'human'}];
+    }catch(error){
+      if(!(error instanceof RangeError))throw error;
+      session.weekly={request,plan:null,ready:false};
+      this.add(session,'assistant','No pude resolver esa fecha u hora de forma inequívoca. ¿Qué semana y horario querés reservar?');
+      session.choices=[{label:'Descartar esta propuesta',action:'discard_week'},{label:'Hablar con recepción',action:'human'}];
+    }
+  }
+
+  private async confirmWeekly(id:string,session:Session,current:ChatView,messageId:string){
+    const pending=session.weekly;
+    if(!pending){this.add(session,'assistant','Primero necesito revisar los días y mostrarte la propuesta semanal para que la confirmes.');session.choices=[{label:'Buscar horarios',action:'start'}];return;}
+    if(!pending.plan||!pending.ready||pending.plan.expiresAt<=Date.now()){
+      if(pending.plan?.expiresAt&&pending.plan.expiresAt<=Date.now())this.add(session,'assistant','La propuesta venció. Voy a revisar los horarios otra vez antes de pedirte una confirmación nueva.');
+      await this.prepareWeekly(id,session,current,pending.request,'');return;
+    }
+    try{
+      const results=await bookWeekly(this.repository,id,pending.plan,`week-${messageId}`);
+      const zone=(await this.repository.db.query<{time_zone:string}>('select time_zone from public.clinics')).rows[0]!.time_zone;
+      const lines=pending.plan.slots.map(slot=>`• ${new Intl.DateTimeFormat('es-AR',{timeZone:zone,weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(slot.start))} · ${slot.therapistName}`);
+      this.add(session,'assistant',`Quedaron confirmados los ${results.length} turnos nuevos:\n${lines.join('\n')}${pending.plan.existing.length?'\nLos turnos que ya tenías confirmados se conservaron.':''}`);
+      session.weekly=null;session.choices=[{label:'Hablar con recepción',action:'human'}];
+    }catch(error){
+      if(!(error instanceof DomainError))throw error;
+      this.add(session,'assistant',error.code==='AGENT_PAUSED'?'Recepción está atendiendo esta conversación. No agregué turnos.':'La propuesta cambió y no agregué ningún turno nuevo. Voy a revisar toda la semana otra vez; tus reservas previas se conservan.');
+      if(error.code!=='AGENT_PAUSED')await this.prepareWeekly(id,session,await this.get(id),pending.request,'');
+    }
+  }
+
   async send(id: string, input: ChatInput):Promise<ChatView> {
     if(!this.scoped)return this.stored(id,service=>service.send(id,input),{key:input.messageId,payload:{kind:'patient',text:input.text??null,action:input.action??null,slotId:input.slotId??null,...(input.appointmentId?{appointmentId:input.appointmentId}:{})}});
     return this.serial(id, async () => {
@@ -209,20 +252,27 @@ export class DemoService {
       if (session.processed.has(input.messageId)) return this.get(id);
       if (session.messages.length > 120) throw new DomainError('DEMO_LIMIT_REACHED', 409);
       let action = input.action ?? (/recepci[oó]n|humano|persona|ayuda|factura|dolor|m[eé]dic/i.test(input.text ?? '') ? 'human' : 'start');
-      const text = input.text ?? ({ start: 'Quiero reservar un turno',more:'Buscar en los próximos días', select: 'Ese horario me sirve', confirm: 'Sí, confirmo el turno', human: 'Quiero hablar con recepción',reschedule:'Quiero cambiar ese turno',cancel:'Quiero cancelar ese turno',confirm_cancel:'Sí, confirmo la cancelación',keep:'Mantener mis turnos' }[action]);
+      const text = input.text ?? ({ start: 'Quiero reservar un turno',more:'Buscar en los próximos días', select: 'Ese horario me sirve', confirm: 'Sí, confirmo el turno', human: 'Quiero hablar con recepción',reschedule:'Quiero cambiar ese turno',cancel:'Quiero cancelar ese turno',confirm_cancel:'Sí, confirmo la cancelación',keep:'Mantener mis turnos',confirm_week:'Sí, confirmo los turnos de la semana',discard_week:'Descartar la propuesta semanal' }[action]);
       // Only this conversation's persisted transcript is supplied to the model.
       this.add(session, 'patient', text);
       const pendingCancellation=session.cancellation;
+      const weeklyConfirmation=input.action==='confirm_week'||Boolean(session.weekly&&input.text&&(isExplicitConfirmation(input.text)||isWeeklyConfirmation(input.text)));
+      if(session.weekly&&!weeklyConfirmation)session.weekly.ready=false;
       if(input.text&&!isCancellationConfirmation(input.text)){session.cancellation=null;session.choices=session.choices.filter(c=>c.action!=='confirm_cancel');}
       const explicitInfo=input.text?explicitPatientInfo(input.text):null;
       if(explicitInfo){
         await this.repository.updatePatientDetails(id,explicitInfo);
         if(current.status==='active')this.add(session,'assistant',explicitInfo.reported_reason?'Guardé lo que me contaste como motivo referido por vos, sin verificación clínica.':'Guardé esa información en tu ficha.');
+        if(current.status==='active'&&session.weekly&&!isCancellationRequest(input.text??'')){await this.prepareWeekly(id,session,current,session.weekly.request,'');session.processed.add(input.messageId);return this.get(id);}
         if(current.status!=='active'||!isCancellationRequest(input.text??'')){session.processed.add(input.messageId);return this.get(id);}
       }
       if (current.status !== 'active') {
         session.processed.add(input.messageId);
         return this.get(id);
+      }
+      if(weeklyConfirmation){await this.confirmWeekly(id,session,current,input.messageId);session.processed.add(input.messageId);return this.get(id);}
+      if(input.action==='discard_week'||session.weekly&&input.text&&/^(?:no(?: gracias)?|mejor no|descartar|no confirmo)[.!]?$/i.test(input.text.trim())){
+        session.weekly=null;session.choices=[{label:'Buscar horarios',action:'start'}];this.add(session,'assistant','Descarté la propuesta semanal. No agregué turnos; tus reservas anteriores se conservan.');session.processed.add(input.messageId);return this.get(id);
       }
       const keep=input.action==='keep'||pendingCancellation&&input.text&&/^(?:no(?: gracias)?[.!]?$|no[, ]+(?:lo |la )?canceles|no quiero cancelar|mejor no\b|manten|dejalo)/i.test(input.text.trim());
       if(keep){
@@ -276,14 +326,26 @@ export class DemoService {
             const therapists=(await this.repository.getTherapists()).map(t=>({id:String(t.id),name:String(t.name),specialty:String(t.specialty)}));
             const localNow=Temporal.Now.zonedDateTimeISO(clinic.time_zone).toString();
             const decision=await this.intentModel.decide({now:localNow,timeZone:clinic.time_zone,clinicName:clinic.name,therapists,
-              patient:{name:current.patient.name_collected?current.patient.name:null,phone:current.patient.phone,insurance:current.patient.insurance,summary:current.patient.intake_summary,missing:missingContact(current.patient)},hasAppointment:current.hasAppointment,appointments:current.appointments,rescheduling:session.rescheduling,search:session.search,
+              patient:{name:current.patient.name_collected?current.patient.name:null,phone:current.patient.phone,insurance:current.patient.insurance,summary:current.patient.intake_summary,missing:missingContact(current.patient)},hasAppointment:current.hasAppointment,appointments:current.appointments,rescheduling:session.rescheduling,search:session.search,weeklyRequest:session.weekly?.request??null,
               offered:session.offered,selectedSlotId:session.selected,history:session.messages.map(m=>({role:m.role,text:m.text}))});
             session.providerError=null;
             if((await this.get(id)).status!=='active'){session.processed.add(input.messageId);return this.get(id);}
+            if(decision.kind==='weekly'){
+              await this.prepareWeekly(id,session,current,decision.request,input.text);session.processed.add(input.messageId);return this.get(id);
+            }
             if(decision.kind==='cancel'){
               await this.prepareCancellation(id,session,current,decision.appointmentId,input.text);session.processed.add(input.messageId);return this.get(id);
             }
             if(decision.kind==='patient'){
+              if(session.weekly){
+                const request=session.weekly.request;
+                try{
+                  const patient=await this.repository.updatePatientDetails(id,groundedPatientPatch(decision.details,input.text)),missing=missingContact(patient);
+                  if(missing.length){this.add(session,'assistant',`Gracias. Para reservar los turnos de la semana me falta tu ${missing[0]}.`);session.processed.add(input.messageId);return this.get(id);}
+                }
+                catch{this.add(session,'assistant','No pude guardar esos datos. Indicame un nombre y teléfono válido de 7 a 15 dígitos.');session.processed.add(input.messageId);return this.get(id);}
+                await this.prepareWeekly(id,session,current,request,'');session.processed.add(input.messageId);return this.get(id);
+              }
               let intake:NarrationContext|null=null;
               let suffix='';
               const replyIndex=session.messages.length;
@@ -319,6 +381,7 @@ export class DemoService {
             }
             if(decision.kind!=='handoff'||decision.reason!=='not_understood')session.clarificationCount=0;
             if(decision.kind==='availability'||decision.kind==='reschedule'){
+              session.weekly=null;
               action='start';filter=normalizeAvailabilitySearch(decision.filter,input.text,localNow,clinic.time_zone,therapists,session.search);
               if(decision.kind==='reschedule'&&!await this.prepareReschedule(id,session,current,decision.appointmentId,filter)){session.processed.add(input.messageId);return this.get(id);}
             }
@@ -332,6 +395,7 @@ export class DemoService {
               action='human';reason=decision.reason;
             }
             if(decision.kind==='confirm'){
+              if(session.weekly){await this.prepareWeekly(id,session,current,session.weekly.request,'');session.processed.add(input.messageId);return this.get(id);}
               // A tool argument never acts as patient consent.
               this.add(session,'assistant',session.selected?'Para confirmar ese turno, tocá «Confirmar turno» o escribí «sí, confirmo».':'Primero tenemos que elegir un horario.');
               session.choices=session.selected?[{label:'Confirmar turno',action:'confirm'},{label:'Ver otros horarios',action:'start'}]:[{label:'Buscar horarios',action:'start'}];
@@ -358,6 +422,7 @@ export class DemoService {
         }
       }else if(!input.action&&session.selected&&isExplicitConfirmation(text))action='confirm';
       session.choices = [];
+      session.weekly=null;
       const replyIndex=session.messages.length;
       let narration:NarrationContext|null=null;
       let verifiedSuffix='';
@@ -505,7 +570,7 @@ export class DemoService {
     return this.serial(id,async()=>{
       const result=await this.repository.setConversationArchived(id,archived);
       const session=this.sessions.get(id);
-      if(session){session.selected=null;session.rescheduling=null;session.cancellation=null;session.offered=[];session.search=null;session.choices=[{label:'Buscar horarios',action:'start'},{label:'Hablar con recepción',action:'human'}];}
+      if(session){session.selected=null;session.rescheduling=null;session.cancellation=null;session.weekly=null;session.offered=[];session.search=null;session.choices=[{label:'Buscar horarios',action:'start'},{label:'Hablar con recepción',action:'human'}];}
       return result;
     });
   }

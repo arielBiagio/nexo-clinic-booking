@@ -166,7 +166,7 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
     app.post('/v1/demo/conversations', request => demo.create(z.strictObject({ name:z.string().trim().min(2).max(70).optional() }).parse(request.body ?? {}).name));
     app.get('/v1/demo/conversations/:id', request => demo.get(id.parse((request.params as {id:string}).id)));
     app.post('/v1/demo/conversations/:id/messages', request => {
-      const input = z.strictObject({ messageId:id,text:z.string().trim().min(1).max(500).optional(),action:z.enum(['start','more','select','confirm','human','reschedule','cancel','confirm_cancel','keep']).optional(),slotId:id.optional(),appointmentId:id.optional() })
+      const input = z.strictObject({ messageId:id,text:z.string().trim().min(1).max(500).optional(),action:z.enum(['start','more','select','confirm','human','reschedule','cancel','confirm_cancel','keep','confirm_week','discard_week']).optional(),slotId:id.optional(),appointmentId:id.optional() })
         .refine(value=>value.text || value.action).refine(value=>!(value.text&&value.action)).parse(request.body);
       return demo.send(id.parse((request.params as {id:string}).id),input);
     });
