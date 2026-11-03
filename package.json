@@ -15,6 +15,7 @@
     "check": "npm run typecheck && npm run build && npm test",
     "db:migration": "supabase migration new",
     "demo": "tsx scripts/demo.ts",
+    "telegram": "tsx --env-file-if-exists=.env scripts/telegram.ts",
     "smoke": "tsx --env-file-if-exists=.env scripts/smoke-api.ts"
   },
   "dependencies": {

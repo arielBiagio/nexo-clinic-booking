@@ -94,11 +94,11 @@ export class DemoService {
     try { return await current; } finally { if (this.queues.get(id) === current) this.queues.delete(id); }
   }
 
-  async create(name = 'Paciente de prueba') {
+  async create(name = 'Paciente de prueba',externalIdentity?:string) {
     const patient = randomUUID(), identity = randomUUID(), conversation = randomUUID();
     await this.repository.db.transaction(async db => {
       await db.query('insert into public.patients(id,name,name_collected) values ($1,$2,$3)', [patient, name,name!=='Paciente de prueba']);
-      await db.query("insert into public.patient_identities(id,patient_id,channel,external_user_id) values ($1,$2,'telegram',$3)", [identity, patient, `demo-${identity}`]);
+      await db.query("insert into public.patient_identities(id,patient_id,channel,external_user_id) values ($1,$2,'telegram',$3)", [identity, patient, externalIdentity??`demo-${identity}`]);
       await db.query('insert into public.conversations(id,identity_id) values ($1,$2)', [conversation,identity]);
       const service=new DemoService(new ClinicRepository(withSavepoints(db)),this.intentModel,true);
       const session=await service.loadSession(conversation,null);

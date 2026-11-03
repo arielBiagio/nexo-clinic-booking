@@ -11,6 +11,7 @@
 - Ficha del paciente con nombre, teléfono, seguro y resumen de información referida.
 - Bandeja de conversaciones, atención humana y reanudación del asistente.
 - Historial de mensajes y contexto de reservas persistentes, con protección contra mensajes duplicados.
+- Reservas por Telegram en chats privados de prueba, con botones y respuestas de recepción.
 - Configuración de jornadas, descansos, duración de sesiones y ausencias.
 - Cancelación y restauración de turnos; archivo y recuperación de conversaciones.
 - Fichas y reservas compartidas en Supabase, con protección contra turnos superpuestos; modo local opcional.
@@ -22,4 +23,5 @@
 - Fastify y Zod.
 - Supabase Auth, PostgreSQL, PGlite y migraciones SQL.
 - OpenRouter con GPT-4o mini.
+- Telegram Bot API mediante long polling y cola persistente de envíos.
 - Temporal para fechas, horarios y zonas horarias.
