@@ -80,8 +80,8 @@ export class TelegramService {
         [match[1],this.botId,userId,peer.conversation_id,message.message_id])).rows[0];
       const choice=delivery?.choices[Number(match[2])];
       const current=await service.get(peer.conversation_id);
-      if(!choice||!current.choices.some(c=>c.action===choice.action&&c.slotId===choice.slotId))return {callback:'Ese botón venció. Usá las últimas opciones o escribí qué turno buscás.',notice:null};
-      input={messageId,action:choice.action,...(choice.slotId?{slotId:choice.slotId}:{})};
+      if(!choice||!current.choices.some(c=>c.action===choice.action&&c.slotId===choice.slotId&&c.appointmentId===choice.appointmentId))return {callback:'Ese botón venció. Usá las últimas opciones o escribí qué turno buscás.',notice:null};
+      input={messageId,action:choice.action,...(choice.slotId?{slotId:choice.slotId}:{}),...(choice.appointmentId?{appointmentId:choice.appointmentId}:{})};
     }else if(/^\/start(?:@\w+)?(?:\s|$)/.test(text)||/^\/help(?:@\w+)?$/.test(text)){
       await this.notice(db,peer.conversation_id,'Podés pedir un turno indicando el día y la franja, por ejemplo: «Quiero fisio el viernes por la tarde». Para hablar con alguien, escribí «recepción».');
       return empty;

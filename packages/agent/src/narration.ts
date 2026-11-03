@@ -1,6 +1,6 @@
 /** Facts come from completed backend operations, never from a proposed tool call. */
 export interface NarrationContext {
-  event:'availability'|'selected'|'booked'|'patient_updated'|'handoff'|'action_failed';
+  event:'availability'|'selected'|'booked'|'rescheduled'|'patient_updated'|'handoff'|'action_failed';
   request:string;
   facts:Record<string,string|number|boolean|string[]|null>;
   variables:Record<string,string>;
@@ -13,6 +13,7 @@ export function narrationPrompt(context:NarrationContext):string {
     availability:'Introduce the appointment buttons, without listing them. Honor day/window/therapist. exact_time_status=unavailable: explicitly acknowledge no availability at {requested_time}, then offer alternatives in the checked scope; never infer occupied/taken. unknown or search_complete=false: absence proves nothing. No results: explain the searched scope and suggest changing preferences. Never claim a booking.',
     selected:'Selection only, not booked. Backend appends exact details and asks for confirmation/missing contact; write a brief introduction, without repeating its question.',
     booked:'Booking succeeded: say it is confirmed. Backend appends exact details. No notifications were sent; promise none.',
+    rescheduled:'Rescheduling succeeded: say the appointment was moved and its previous time was released. Backend appends exact details. Promise no notifications.',
     patient_updated:'Only saved_fields were saved. Briefly acknowledge this. Backend appends any missing-contact question or appointment details; do not repeat them.',
     handoff:'Reception handoff succeeded. Say the team can continue here; promise no response time.',
     action_failed:'The action failed. Briefly explain the verified limitation; never promise success.',
@@ -38,11 +39,13 @@ export function renderNarration(draft:string,context:NarrationContext):string|nu
   if(/[{}]/.test(text.replace(/\{[a-z_]+\}/g,'')))return null;
   // Cosmetic generation cannot announce an unexecuted mutation or invent its cause.
   const value=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
-  if(context.event!=='booked'&&/\b(confirmad[oa]s?|reservad[oa]s?|agendad[oa]s?|booked|confirmed|scheduled)\b|(?:te|ya|i) (?:reserve|agende|booked|confirmed)/.test(value))return null;
+  if(context.event!=='rescheduled'&&/\b(reprograme|reprogramad[oa]s?|cambie|cambiad[oa]s?|movi|rescheduled|moved)\b/.test(value))return null;
+  if(!['booked','rescheduled'].includes(context.event)&&/\b(confirmad[oa]s?|reservad[oa]s?|agendad[oa]s?|reprogramad[oa]s?|booked|confirmed|scheduled|rescheduled)\b|(?:te|ya|i) (?:reserve|agende|booked|confirmed)/.test(value))return null;
   if(context.event!=='patient_updated'&&/\b(guarde|guardad[oa]|actualice|registr[eé]|saved|updated)\b/.test(value))return null;
   if(/\b(ocupad[oa]s?|taken|fully booked|busy)\b/.test(value))return null;
   if(/\b(correo|email|sms|whatsapp|calendar)\b|\benvi|\bsent\b/.test(value))return null;
   if(context.event==='booked'&&!/\b(confirmad[oa]|reservad[oa]|agendad[oa]|booked|confirmed|scheduled)\b/.test(value))return null;
+  if(context.event==='rescheduled'&&!/\b(reprogramad[oa]|reprograme|cambiad[oa]|cambie|rescheduled|moved)\b/.test(value))return null;
   if(context.event==='availability'&&context.facts.exact_time_status==='unavailable'&&!/no (?:esta |hay |tengo |encontre |tenemos |se encuentra )?(?:turnos? |horarios? )?disponib|not available|isn't available|no openings/.test(value))return null;
   return text.replace(/\{([a-z_]+)\}/g,(_match,key:string)=>context.variables[key]!);
 }

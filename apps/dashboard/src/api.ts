@@ -1,6 +1,9 @@
 import { Temporal } from '@js-temporal/polyfill';
 
 const errors:Record<string,string> = {
+  APPOINTMENT_CHANGED:'El turno cambió mientras lo editabas. Cerrá esta ventana y volvé a abrirlo desde la agenda actualizada.',
+  APPOINTMENT_NOT_EDITABLE:'Solo se pueden reprogramar reservas confirmadas que todavía no comenzaron.',
+  MESSAGE_NOT_FOUND:'El mensaje ya no está disponible en esta conversación.',
   IDEMPOTENCY_CONFLICT:'La solicitud ya fue procesada con otros datos. Cerrá el formulario y revisá la agenda antes de volver a reservar.',
   TIME_OFF_NOT_FOUND:'La ausencia ya no existe o no pertenece a este profesional.',
   INVALID_CREDENTIALS:'Correo o contraseña incorrectos.',

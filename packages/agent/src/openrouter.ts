@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { calendarHints } from './calendar.js';
-import { isAvailabilityRequest } from './search.js';
+import { isAvailabilityRequest,isRescheduleRequest } from './search.js';
 import { bookingGuidelines } from './booking-prompt.js';
 import { narrationPrompt, type NarrationContext } from './narration.js';
 
@@ -15,6 +15,7 @@ export type AvailabilityInput = z.infer<typeof availabilityInput>;
 const patientInput=z.strictObject({name:z.string().min(2).max(70).nullable(),phone:z.string().max(40).nullable(),insurance:z.string().max(120).nullable(),reported_reason:z.string().max(400).nullable(),additional_info:z.string().max(600).nullable()});
 export type AgentDecision =
   | {kind:'availability';filter:AvailabilityInput}
+  | {kind:'reschedule';appointmentId:string|null;filter:AvailabilityInput}
   | {kind:'select';slotId:string}
   | {kind:'confirm'}
   | {kind:'patient';details:z.infer<typeof patientInput>}
@@ -27,6 +28,8 @@ export interface AgentContext {
   offered:OfferedSlot[];selectedSlotId:string|null;
   patient?:{name:string|null;phone:string|null;insurance:string|null;summary?:string;missing:string[]};
   hasAppointment?:boolean;
+  appointments?:{id:string;therapistId:string;therapistName:string;start:string;end:string;version:number}[];
+  rescheduling?:{id:string;version:number}|null;
   search?:AvailabilityInput|null;
   history:{role:'patient'|'assistant'|'staff';text:string}[];
 }
@@ -52,8 +55,12 @@ const definitions = [
     not_after:{type:['string','null'],description:'Hora local límite HH:MM o null.'},horizon_days:{type:'integer',minimum:1,maximum:14},
   },required:['therapist_id','date','not_before','not_after','horizon_days']}},
   {name:'select_slot',description:'Seleccionar exactamente uno de los IDs de horarios ofrecidos en el contexto. Todavía no reserva: el backend pedirá confirmación.',parameters:{type:'object',additionalProperties:false,properties:{slot_id:{type:'string'}},required:['slot_id']}},
+  {name:'get_reschedule_availability',description:'Iniciar un cambio de día/horario de una reserva confirmada del paciente, sin cancelarla. appointment_id solo de appointments; null si no se sabe cuál. Busca alternativas, aún requiere elegir y confirmar. Conservá terapeuta salvo preferencia explícita distinta.',parameters:{type:'object',additionalProperties:false,properties:{
+    appointment_id:{type:['string','null']},therapist_id:{type:['string','null']},date:{type:['string','null']},
+    not_before:{type:['string','null']},not_after:{type:['string','null']},horizon_days:{type:'integer',minimum:1,maximum:14},
+  },required:['appointment_id','therapist_id','date','not_before','not_after','horizon_days']}},
   {name:'book_selected_slot',description:'Solicitar reservar el horario ya seleccionado solo si el último mensaje del paciente es una confirmación explícita. El backend verifica esa confirmación por separado.',parameters:{type:'object',additionalProperties:false,properties:{},required:[]}},
-  {name:'escalate_to_human',description:'Derivar a recepción si se pide una persona, hay preguntas clínicas, facturación, cancelación/reprogramación o excepciones. No dar consejo médico.',parameters:{type:'object',additionalProperties:false,properties:{reason:{type:'string',enum:handoffReason.options}},required:['reason']}},
+  {name:'escalate_to_human',description:'Derivar a recepción si se pide una persona, hay preguntas clínicas, facturación, cancelación o excepciones. Reprogramar usa get_reschedule_availability. No dar consejo médico.',parameters:{type:'object',additionalProperties:false,properties:{reason:{type:'string',enum:handoffReason.options}},required:['reason']}},
 ];
 const completion = z.object({choices:z.array(z.object({
   finish_reason:z.enum(['stop','tool_calls']),
@@ -105,7 +112,8 @@ export class OpenRouterModel implements IntentModel {
   async decide(context:AgentContext):Promise<AgentDecision> {
     this.reserveRequest();
     const latest=context.history.filter(m=>m.role==='patient').at(-1)?.text??'';
-    const searching=isAvailabilityRequest(latest,context.therapists,context.search);
+    const moving=isRescheduleRequest(latest);
+    const searching=!moving&&isAvailabilityRequest(latest,context.therapists,context.search);
     const system = `${bookingGuidelines}
 
 REGLAS DE INTEGRACIÓN CON NEXO
@@ -124,9 +132,9 @@ Elegí una sola herramienta por mensaje. get_availability consulta; select_slot 
 El backend muestra los horarios y las confirmaciones con datos reales. No escribas horas concretas ni afirmes reservas por tu cuenta.
 Un horario no se reserva hasta que el paciente confirma explícitamente después de seleccionarlo. Nunca uses sí/confirmo de un turno anterior.
 Para consultas ambiguas, pedí una aclaración. Un saludo puede responderse directamente. No inventes IDs.
-No cambies ni canceles citas con estas herramientas: derivá a recepción. No solicites datos clínicos.
+Para cambiar día u horario de una cita existente usá get_reschedule_availability. appointments lista solo reservas futuras del paciente. Conservá el terapeuta original si no pide otro. Si hay varias citas y no identifica cuál, appointment_id=null: el backend le preguntará. La cita original sigue confirmada hasta que elige y confirma el cambio. En modo rescheduling las siguientes búsquedas y selecciones ajustan ese mismo cambio, no crean una reserva nueva. Cancelaciones se derivan a recepción. No solicites datos clínicos.
 La fecha actual incluye zona horaria. Usá calendar.nextWeekdays para días de la semana y calendar.followingWeek si se pide la semana que viene; no calcules esas fechas de memoria.
-Contexto actual (JSON del backend): ${JSON.stringify({now:context.now,timeZone:context.timeZone,calendar:calendarHints(context.now,context.timeZone),clinicName:context.clinicName,therapists:context.therapists,offered:context.offered,selectedSlotId:context.selectedSlotId,patient:context.patient,hasAppointment:context.hasAppointment,previousSearch:context.search})}`;
+Contexto actual (JSON del backend): ${JSON.stringify({now:context.now,timeZone:context.timeZone,calendar:calendarHints(context.now,context.timeZone),clinicName:context.clinicName,therapists:context.therapists,offered:context.offered,selectedSlotId:context.selectedSlotId,patient:context.patient,hasAppointment:context.hasAppointment,appointments:context.appointments,rescheduling:context.rescheduling,previousSearch:context.search})}`;
     let response:Response;
     try {
       response=await this.transport('https://openrouter.ai/api/v1/chat/completions',{
@@ -137,8 +145,8 @@ Contexto actual (JSON del backend): ${JSON.stringify({now:context.now,timeZone:c
         // over accompanying suggestions. No parallel mutation is executed.
         body:JSON.stringify({model:this.model,temperature:0.1,max_tokens:450,stream:false,
           messages:[{role:'system',content:system},...context.history.slice(-24).map(m=>({role:m.role==='patient'?'user':'assistant',content:m.role==='staff'?`Recepción: ${m.text}`:m.text}))],
-          tools:definitions.filter(d=>!searching||d.name==='get_availability').map(definition=>({type:'function',function:{...definition,strict:true}})),
-          tool_choice:searching?{type:'function',function:{name:'get_availability'}}:'auto',provider:{require_parameters:true}}),
+          tools:definitions.filter(d=>moving?d.name==='get_reschedule_availability':!searching||d.name==='get_availability').map(definition=>({type:'function',function:{...definition,strict:true}})),
+          tool_choice:moving?{type:'function',function:{name:'get_reschedule_availability'}}:searching?{type:'function',function:{name:'get_availability'}}:'auto',provider:{require_parameters:true}}),
         signal:AbortSignal.timeout(this.timeoutMs),
       });
     }catch{throw new ProviderError('UNAVAILABLE');}
@@ -181,6 +189,10 @@ Contexto actual (JSON del backend): ${JSON.stringify({now:context.now,timeZone:c
       switch(call.function.name){
         case 'update_patient_details':return {kind:'patient',details:patientInput.parse(args)};
         case 'get_availability':return {kind:'availability',filter:availabilityInput.parse(args)};
+        case 'get_reschedule_availability':{
+          const {appointment_id,...filter}=z.strictObject({...availabilityInput.shape,appointment_id:z.uuid().nullable()}).parse(args);
+          return {kind:'reschedule',appointmentId:appointment_id,filter};
+        }
         case 'select_slot':return {kind:'select',slotId:z.strictObject({slot_id:z.uuid()}).parse(args).slot_id};
         case 'book_selected_slot':z.strictObject({}).parse(args);return {kind:'confirm'};
         case 'escalate_to_human':return {kind:'handoff',reason:z.strictObject({reason:handoffReason}).parse(args).reason};

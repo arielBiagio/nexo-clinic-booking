@@ -43,7 +43,7 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
         const route=pathname??'',method=request.method;
         let allowed=method==='GET'&&(['/v1/auth/me','/v1/dashboard','/v1/therapists','/v1/demo/removed/appointments'].includes(route)||route==='/v1/availability'&&new URL(request.url,'http://local').searchParams.get('therapistId')===own);
         if(route===`/v1/therapists/${own}/profile`&&['GET','PATCH'].includes(method)||route===`/v1/therapists/${own}/schedule`&&['GET','PUT'].includes(method)||route===`/v1/therapists/${own}/time-off`&&method==='POST'||route.startsWith(`/v1/therapists/${own}/time-off/`)&&method==='DELETE'||route===`/v1/therapists/${own}/appointments`&&method==='POST')allowed=true;
-        const appointment=route.match(/^\/v1\/appointments\/([^/]+)(\/restore)?$/);
+        const appointment=route.match(/^\/v1\/appointments\/([^/]+)(\/restore|\/reschedule)?$/);
         if(appointment&&(method==='DELETE'&&!appointment[2]||method==='POST'&&appointment[2])){
           const row=(await repository.db.query('select therapist_id from public.appointments where id=$1',[id.parse(appointment[1])])).rows[0];
           if(!row)throw new DomainError('APPOINTMENT_NOT_FOUND',404);
@@ -88,6 +88,16 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
     return repository.createManualAppointment(id.parse((request.params as {id:string}).id),input,requestId,request.staff);
   });
   app.get('/v1/conversations', () => repository.getConversations());
+  app.get('/v1/inbox/unread',request=>repository.getUnreadConversations(request.staff?.id??'local'));
+  app.post('/v1/conversations/:id/read',request=>{
+    const input=z.strictObject({lastMessageId:id}).parse(request.body);
+    return repository.markConversationRead(request.staff?.id??'local',id.parse((request.params as {id:string}).id),input.lastMessageId);
+  });
+  app.post('/v1/appointments/:id/reschedule',request=>{
+    const input=z.strictObject({slotId:id,expectedVersion:z.number().int().min(0),confirmed:z.literal(true)}).parse(request.body);
+    return repository.rescheduleAppointment(id.parse((request.params as {id:string}).id),input.slotId,z.uuid().parse(request.headers['idempotency-key']),{
+      expectedVersion:input.expectedVersion,confirmed:input.confirmed,therapistScope:request.staff?.role==='therapist'?request.staff.therapistId??undefined:undefined,notifyPatient:true});
+  });
   app.get('/v1/conversations/:id/patient',request=>repository.getPatientDetails(id.parse((request.params as {id:string}).id)));
   app.patch('/v1/conversations/:id/patient',request=>repository.updatePatientDetails(id.parse((request.params as {id:string}).id),patientDetailsInput.parse(request.body)));
   app.get('/v1/availability', async request => {
@@ -140,7 +150,7 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
     app.post('/v1/demo/conversations', request => demo.create(z.strictObject({ name:z.string().trim().min(2).max(70).optional() }).parse(request.body ?? {}).name));
     app.get('/v1/demo/conversations/:id', request => demo.get(id.parse((request.params as {id:string}).id)));
     app.post('/v1/demo/conversations/:id/messages', request => {
-      const input = z.strictObject({ messageId:id,text:z.string().trim().min(1).max(500).optional(),action:z.enum(['start','more','select','confirm','human']).optional(),slotId:id.optional() })
+      const input = z.strictObject({ messageId:id,text:z.string().trim().min(1).max(500).optional(),action:z.enum(['start','more','select','confirm','human','reschedule']).optional(),slotId:id.optional(),appointmentId:id.optional() })
         .refine(value=>value.text || value.action).refine(value=>!(value.text&&value.action)).parse(request.body);
       return demo.send(id.parse((request.params as {id:string}).id),input);
     });

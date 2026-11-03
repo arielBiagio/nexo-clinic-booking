@@ -24,6 +24,74 @@ const iso = (value: unknown) => value instanceof Date ? value.toISOString() : St
 export class ClinicRepository {
   constructor(readonly db: Sql) {}
 
+  async getUpcomingAppointments(conversationId:string) {
+    return (await this.db.query<{id:string;slot_id:string;therapist_id:string;therapist_name:string;starts_at:Date|string;ends_at:Date|string;version:number}>(`select a.id,a.slot_id,a.therapist_id,t.name as therapist_name,a.starts_at,a.ends_at,a.version
+      from public.appointments a join public.therapists t on t.id=a.therapist_id where a.conversation_id=$1 and a.status='confirmed' and a.starts_at>now() order by a.starts_at`,[conversationId])).rows;
+  }
+
+  async rescheduleAppointment(appointmentId:string,slotId:string,key:string,options:{expectedVersion:number;confirmed:boolean;therapistScope?:string|undefined;conversationId?:string;notifyPatient?:boolean}) {
+    if(!options.confirmed)throw new DomainError('CONFIRMATION_REQUIRED',409);
+    if(key.length<8||key.length>128)throw new DomainError('INVALID_REQUEST_KEY',400);
+    try{return await this.db.transaction(async db=>{
+      const meta=(await db.query('select conversation_id from public.appointments where id=$1',[appointmentId])).rows[0];
+      if(!meta)throw new DomainError('APPOINTMENT_NOT_FOUND',404);
+      if(options.conversationId&&meta.conversation_id!==options.conversationId)throw new DomainError('FORBIDDEN',403);
+      const conversation=(await db.query('select status,archived_at from public.conversations where id=$1 for update',[meta.conversation_id])).rows[0]!;
+      if(options.conversationId&&(conversation.status!=='active'||conversation.archived_at))throw new DomainError('AGENT_PAUSED',409);
+      const appointment=(await db.query('select * from public.appointments where id=$1',[appointmentId])).rows[0]!;
+      if(options.therapistScope&&appointment.therapist_id!==options.therapistScope)throw new DomainError('FORBIDDEN',403);
+      const previous=(await db.query('select * from private.appointment_changes where appointment_id=$1 and request_key=$2',[appointmentId,key])).rows[0];
+      if(previous){
+        if(previous.target_slot_id!==slotId||previous.expected_version!==options.expectedVersion)throw new DomainError('IDEMPOTENCY_CONFLICT',409);
+        return previous.result as Record<string,unknown>;
+      }
+      if(appointment.version!==options.expectedVersion)throw new DomainError('APPOINTMENT_CHANGED',409);
+      if(appointment.status!=='confirmed'||Date.parse(iso(appointment.starts_at))<=Date.now())throw new DomainError('APPOINTMENT_NOT_EDITABLE',409);
+      const target=(await db.query('select therapist_id from public.slots where id=$1',[slotId])).rows[0];
+      if(!target)throw new DomainError('SLOT_UNAVAILABLE',409);
+      if(options.therapistScope&&target.therapist_id!==options.therapistScope)throw new DomainError('FORBIDDEN',403);
+      // Every change locks both therapists in the same order, after its conversation.
+      await db.query('select id from public.therapists where id=any($1::uuid[]) order by id for update',[[appointment.therapist_id,target.therapist_id]]);
+      await db.query('select id from public.appointments where id=$1 for update',[appointmentId]);
+      const slot=(await db.query(`select s.* from public.slots s where s.id=$1 and s.active and s.starts_at>now()
+        and not exists(select 1 from public.appointments a where a.id<>$2 and a.therapist_id=s.therapist_id and a.status='confirmed'
+          and tstzrange(a.starts_at,a.busy_ends_at,'[)') && tstzrange(s.starts_at,s.busy_ends_at,'[)')) for update of s`,[slotId,appointmentId])).rows[0];
+      if(!slot||slot.id===appointment.slot_id)throw new DomainError('SLOT_UNAVAILABLE',409);
+      if((await db.query("select id from private.delivery_jobs where appointment_id=$1 and status='processing'",[appointmentId])).rows.length)throw new DomainError('DELIVERY_IN_PROGRESS',409);
+      const updated=(await db.query(`update public.appointments set slot_id=$2,therapist_id=$3,starts_at=$4,ends_at=$5,busy_ends_at=$6,version=version+1 where id=$1 returning *`,
+        [appointmentId,slot.id,slot.therapist_id,slot.starts_at,slot.ends_at,slot.busy_ends_at])).rows[0]!;
+      await db.query("update private.delivery_jobs set status='pending',attempts=0,available_at=now() where appointment_id=$1",[appointmentId]);
+      await db.query('update public.conversations set pending_slot_id=null,pending_expires_at=null where id=$1',[meta.conversation_id]);
+      await db.query(`update private.conversation_runtime set state=state||'{"rescheduling":null,"offered":[],"choices":[{"label":"Buscar horarios","action":"start"},{"label":"Hablar con recepción","action":"human"}]}'::jsonb where conversation_id=$1`,[meta.conversation_id]);
+      await db.query("insert into private.audit_events(conversation_id,action,entity_id) values ($1,'appointment_rescheduled',$2)",[meta.conversation_id,appointmentId]);
+      await db.query('insert into private.appointment_changes(appointment_id,request_key,expected_version,target_slot_id,result) values ($1,$2,$3,$4,$5::jsonb)',
+        [appointmentId,key,options.expectedVersion,slotId,JSON.stringify(updated)]);
+      if(options.notifyPatient){
+        const clinic=(await db.query<{time_zone:string}>('select time_zone from public.clinics')).rows[0]!;
+        const therapist=(await db.query<{name:string}>('select name from public.therapists where id=$1',[slot.therapist_id])).rows[0]!;
+        const when=new Intl.DateTimeFormat('es-AR',{timeZone:clinic.time_zone,weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(iso(slot.starts_at)));
+        await db.query(`insert into public.messages(conversation_id,external_message_id,direction,role,body) values ($1,$2,'outbound','staff',$3)`,
+          [meta.conversation_id,randomUUID(),`Recepción reprogramó tu turno para el ${when} con ${therapist.name}. El horario anterior quedó liberado.`]);
+      }
+      return updated;
+    });}catch(error){return translateDatabaseError(error);}
+  }
+
+  async getUnreadConversations(readerId:string) {
+    return (await this.db.query(`select c.id,count(m.id)::int as unread_count from public.conversations c
+      left join private.conversation_reads r on r.conversation_id=c.id and r.reader_id=$1
+      join public.messages m on m.conversation_id=c.id and m.direction='inbound' and m.body is not null and m.sequence>coalesce(r.last_sequence,0)
+      where c.archived_at is null group by c.id`,[readerId])).rows;
+  }
+  async markConversationRead(readerId:string,conversationId:string,lastMessageId:string) {
+    const message=(await this.db.query(`select m.sequence from public.messages m join public.conversations c on c.id=m.conversation_id
+      where m.conversation_id=$1 and m.id=$2 and c.archived_at is null`,[conversationId,lastMessageId])).rows[0];
+    if(!message)throw new DomainError('MESSAGE_NOT_FOUND',404);
+    await this.db.query(`insert into private.conversation_reads(reader_id,conversation_id,last_sequence) values ($1,$2,$3)
+      on conflict(reader_id,conversation_id) do update set last_sequence=greatest(private.conversation_reads.last_sequence,excluded.last_sequence)`,[readerId,conversationId,message.sequence]);
+    return {ok:true};
+  }
+
   async getPatientDetails(conversationId:string,db=this.db):Promise<PatientDetails> {
     const row=(await db.query<PatientDetails>(`select p.name,p.name_collected,p.phone,p.insurance,p.reported_reason,p.additional_info,p.intake_summary,p.details_updated_at
       from public.patients p join public.patient_identities i on i.patient_id=p.id
@@ -120,7 +188,7 @@ export class ClinicRepository {
         if(!valid)throw new DomainError('SLOT_UNAVAILABLE',409);
       }
       if((await db.query("select id from private.delivery_jobs where appointment_id=$1 and status='processing'",[appointmentId])).rows.length)throw new DomainError('DELIVERY_IN_PROGRESS',409);
-      await db.query('update public.appointments set status=$2 where id=$1',[appointmentId,status]);
+      await db.query('update public.appointments set status=$2,version=version+1 where id=$1',[appointmentId,status]);
       await db.query(`update private.delivery_jobs set status=$2 where appointment_id=$1 and status ${removed?"in ('pending','failed')":"= 'cancelled'"}`,[appointmentId,removed?'cancelled':'pending']);
       await db.query('insert into private.audit_events(conversation_id,action,entity_id) values ($1,$2,$3)',[meta.conversation_id,removed?'appointment_cancelled':'appointment_restored',appointmentId]);
       return {id:appointmentId,status};

@@ -5,14 +5,15 @@ import { withSavepoints } from '../../../packages/db/src/savepoints.js';
 import { isExplicitConfirmation, ProviderError, type AvailabilityInput, type IntentModel, type OfferedSlot } from '../../../packages/agent/src/openrouter.js';
 import { normalizeAvailabilitySearch, requestedLocalTime, offeredSelection, rejectsSelectedSlot } from '../../../packages/agent/src/search.js';
 import { renderNarration, type NarrationContext } from '../../../packages/agent/src/narration.js';
-import { groundedPatientPatch, missingContact, type PatientDetails } from '../../../packages/core/src/patient.js';
+import { groundedPatientPatch, missingContact, explicitPatientInfo,type PatientDetails } from '../../../packages/core/src/patient.js';
 
 export interface DemoMessage { id: string; role: 'patient' | 'assistant' | 'staff'; text: string; at: string }
-export interface DemoChoice { label: string; action: 'start' | 'more' | 'select' | 'confirm' | 'human'; slotId?: string }
-export interface ChatView {id:string;status:string;name:string;messages:DemoMessage[];choices:DemoChoice[];patient:PatientDetails;hasAppointment:boolean;ai:{provider:string;model:string|null;error:string|null}}
-interface Session { messages: DemoMessage[]; choices: DemoChoice[]; selected: string | null; processed: Set<string>; offered:OfferedSlot[]; modelRequests:number; clarificationCount:number; providerError:string|null;search:AvailabilityInput|null }
+export interface DemoChoice { label: string; action: 'start' | 'more' | 'select' | 'confirm' | 'human'|'reschedule'; slotId?: string;appointmentId?:string }
+interface UpcomingAppointment {id:string;therapistId:string;therapistName:string;start:string;end:string;version:number}
+export interface ChatView {id:string;status:string;name:string;messages:DemoMessage[];choices:DemoChoice[];patient:PatientDetails;hasAppointment:boolean;appointments:UpcomingAppointment[];ai:{provider:string;model:string|null;error:string|null}}
+interface Session { messages: DemoMessage[]; choices: DemoChoice[]; selected: string | null; processed: Set<string>; offered:OfferedSlot[]; modelRequests:number; clarificationCount:number; providerError:string|null;search:AvailabilityInput|null;rescheduling:{id:string;version:number}|null }
 type StoredSession = Omit<Session,'messages'|'selected'|'processed'> & {processed:string[]; inputs:[string,string][]};
-export interface ChatInput { messageId: string; text?: string | undefined; action?: 'start' | 'more' | 'select' | 'confirm' | 'human' | undefined; slotId?: string | undefined }
+export interface ChatInput { messageId: string; text?: string | undefined; action?: 'start' | 'more' | 'select' | 'confirm' | 'human'|'reschedule' | undefined; slotId?: string | undefined;appointmentId?:string|undefined }
 
 export class DemoService {
   readonly sessions = new Map<string, Session>();
@@ -27,7 +28,7 @@ export class DemoService {
       'select id,role,body,created_at from public.messages where conversation_id=$1 and body is not null order by sequence',[id])).rows.map(row=>({id:row.id,role:row.role,text:row.body,at:new Date(row.created_at).toISOString()}));
     const session:Session={messages,choices:stored?.choices??[{label:'Buscar horarios',action:'start'},{label:'Hablar con recepción',action:'human'}],
       selected:pending,processed:new Set(stored?.processed??[]),offered:stored?.offered??[],modelRequests:stored?.modelRequests??0,
-      clarificationCount:stored?.clarificationCount??0,providerError:stored?.providerError??null,search:stored?.search??null};
+      clarificationCount:stored?.clarificationCount??0,providerError:stored?.providerError??null,search:stored?.search??null,rescheduling:stored?.rescheduling??null};
     for(const [key,value] of stored?.inputs??[])this.inputs.set(key,value);
     this.sessions.set(id,session);
     return session;
@@ -120,17 +121,37 @@ export class DemoService {
     if(!session){
       session=await this.loadSession(id,row.pending_slot_id?String(row.pending_slot_id):null);
     }
+    const appointments=(await this.repository.getUpcomingAppointments(id)).map(a=>({id:a.id,therapistId:a.therapist_id,therapistName:a.therapist_name,start:new Date(a.starts_at).toISOString(),end:new Date(a.ends_at).toISOString(),version:a.version}));
+    if(session.rescheduling&&!appointments.some(a=>a.id===session.rescheduling!.id&&a.version===session.rescheduling!.version)){
+      session.rescheduling=null;session.selected=null;session.offered=[];session.choices=[{label:'Buscar horarios',action:'start'}];row.pending_slot_id=null;
+      await this.repository.db.query('update public.conversations set pending_slot_id=null,pending_expires_at=null where id=$1',[id]);
+    }
     session.selected=row.status==='active'&&row.pending_slot_id?String(row.pending_slot_id):null;
     if(!session.selected)session.choices=session.choices.filter(choice=>choice.action!=='confirm');
     const patient=await this.repository.getPatientDetails(id);
     if(session.selected&&!missingContact(patient).length&&!session.choices.some(c=>c.action==='confirm'))session.choices.unshift({label:'Confirmar turno',action:'confirm'});
     return { id:String(row.id),status:String(row.status),name:String(row.name),messages: session?.messages ?? [], choices: row.status === 'active' ? session?.choices ?? [] : [],
-      patient,hasAppointment:Boolean(row.has_appointment),
+      patient,hasAppointment:Boolean(row.has_appointment),appointments,
       ai:{provider:this.intentModel?'openrouter':'guided',model:this.intentModel?.model??null,error:session?.providerError??null} };
   }
 
+  private async prepareReschedule(id:string,session:Session,current:ChatView,appointmentId:string|null,filter:AvailabilityInput|null) {
+    const target=appointmentId?current.appointments.find(a=>a.id===appointmentId):current.appointments.length===1?current.appointments[0]:null;
+    session.selected=null;session.offered=[];
+    await this.repository.db.query('update public.conversations set pending_slot_id=null,pending_expires_at=null where id=$1',[id]);
+    if(!target){
+      session.rescheduling=null;session.search=filter;
+      this.add(session,'assistant',current.appointments.length?'¿Cuál de tus turnos querés cambiar? El turno actual se mantiene hasta que confirmes otro horario.':'No encuentro una reserva futura para cambiar en esta conversación. Recepción puede ayudarte a localizarla.');
+      const zone=(await this.repository.db.query<{time_zone:string}>('select time_zone from public.clinics')).rows[0]!.time_zone;
+      session.choices=current.appointments.map(a=>({action:'reschedule',appointmentId:a.id,label:`Cambiar ${new Intl.DateTimeFormat('es-AR',{timeZone:zone,day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(a.start))} · ${a.therapistName}`}));
+      session.choices.push({label:'Hablar con recepción',action:'human'});return false;
+    }
+    session.rescheduling={id:target.id,version:target.version};session.search=filter;
+    return true;
+  }
+
   async send(id: string, input: ChatInput):Promise<ChatView> {
-    if(!this.scoped)return this.stored(id,service=>service.send(id,input),{key:input.messageId,payload:{kind:'patient',text:input.text??null,action:input.action??null,slotId:input.slotId??null}});
+    if(!this.scoped)return this.stored(id,service=>service.send(id,input),{key:input.messageId,payload:{kind:'patient',text:input.text??null,action:input.action??null,slotId:input.slotId??null,...(input.appointmentId?{appointmentId:input.appointmentId}:{})}});
     return this.serial(id, async () => {
       const current = await this.get(id);
       const session = this.sessions.get(id);
@@ -138,9 +159,15 @@ export class DemoService {
       if (session.processed.has(input.messageId)) return this.get(id);
       if (session.messages.length > 120) throw new DomainError('DEMO_LIMIT_REACHED', 409);
       let action = input.action ?? (/recepci[oó]n|humano|persona|ayuda|factura|dolor|m[eé]dic/i.test(input.text ?? '') ? 'human' : 'start');
-      const text = input.text ?? ({ start: 'Quiero reservar un turno',more:'Buscar en los próximos días', select: 'Ese horario me sirve', confirm: 'Sí, confirmo el turno', human: 'Quiero hablar con recepción' }[action]);
+      const text = input.text ?? ({ start: 'Quiero reservar un turno',more:'Buscar en los próximos días', select: 'Ese horario me sirve', confirm: 'Sí, confirmo el turno', human: 'Quiero hablar con recepción',reschedule:'Quiero cambiar ese turno' }[action]);
       // Only this conversation's persisted transcript is supplied to the model.
       this.add(session, 'patient', text);
+      const explicitInfo=input.text?explicitPatientInfo(input.text):null;
+      if(explicitInfo){
+        await this.repository.updatePatientDetails(id,explicitInfo);
+        if(current.status==='active')this.add(session,'assistant',explicitInfo.reported_reason?'Guardé lo que me contaste como motivo referido por vos, sin verificación clínica.':'Guardé esa información en tu ficha.');
+        session.processed.add(input.messageId);return this.get(id);
+      }
       if (current.status !== 'active') {
         session.processed.add(input.messageId);
         return this.get(id);
@@ -152,6 +179,16 @@ export class DemoService {
         session.choices=[{label:'Buscar otros horarios',action:'start'}];
       }
       let filter:AvailabilityInput|null=input.action==='more'&&session.search?{...session.search,date:null,horizon_days:14}:null;
+      if(session.rescheduling&&input.text&&/\b(no quiero (?:cambiar|reprogramar)|dej[aá].*(?:como estaba|como est[aá])|manten[eé].*turno)\b/i.test(input.text)){
+        session.rescheduling=null;session.selected=null;session.offered=[];session.choices=[{label:'Hablar con recepción',action:'human'}];
+        await this.repository.db.query('update public.conversations set pending_slot_id=null,pending_expires_at=null where id=$1',[id]);
+        this.add(session,'assistant','Tu turno actual se mantiene. No hice ningún cambio.');session.processed.add(input.messageId);return this.get(id);
+      }
+      if(input.action==='reschedule'){
+        filter=session.search;
+        if(!await this.prepareReschedule(id,session,current,input.appointmentId??null,filter)){session.processed.add(input.messageId);return this.get(id);}
+        action='start';
+      }
       let selectedSlot=input.slotId;
       let reason='requested_human';
       const ordinal=input.text&&!input.action?offeredSelection(input.text,session.offered):null;
@@ -166,7 +203,7 @@ export class DemoService {
             const therapists=(await this.repository.getTherapists()).map(t=>({id:String(t.id),name:String(t.name),specialty:String(t.specialty)}));
             const localNow=Temporal.Now.zonedDateTimeISO(clinic.time_zone).toString();
             const decision=await this.intentModel.decide({now:localNow,timeZone:clinic.time_zone,clinicName:clinic.name,therapists,
-              patient:{name:current.patient.name_collected?current.patient.name:null,phone:current.patient.phone,insurance:current.patient.insurance,summary:current.patient.intake_summary,missing:missingContact(current.patient)},hasAppointment:current.hasAppointment,search:session.search,
+              patient:{name:current.patient.name_collected?current.patient.name:null,phone:current.patient.phone,insurance:current.patient.insurance,summary:current.patient.intake_summary,missing:missingContact(current.patient)},hasAppointment:current.hasAppointment,appointments:current.appointments,rescheduling:session.rescheduling,search:session.search,
               offered:session.offered,selectedSlotId:session.selected,history:session.messages.map(m=>({role:m.role,text:m.text}))});
             session.providerError=null;
             if((await this.get(id)).status!=='active'){session.processed.add(input.messageId);return this.get(id);}
@@ -198,15 +235,16 @@ export class DemoService {
             }
             if(decision.kind==='reply'){
               // Only successful backend operations may announce concrete appointments or times.
-              const unsafeClaim=/\b(reservad[oa]s?|confirmad[oa]s?|agendad[oa]s?|booked|confirmed|scheduled|guard[eé]|guardad[oa]s?|actualic[eé]|actualizad[oa]s?|registr[eé])\b|te agend[eé]|\b\d{1,2}:\d{2}\b/i.test(decision.text);
+              const unsafeClaim=/\b(reservad[oa]s?|confirmad[oa]s?|agendad[oa]s?|reprogramad[oa]s?|reprogram[eé]|cambi[eé]|cambiad[oa]s?|mov[ií]|booked|confirmed|scheduled|rescheduled|guard[eé]|guardad[oa]s?|actualic[eé]|actualizad[oa]s?|registr[eé])\b|te agend[eé]|\b\d{1,2}:\d{2}\b/i.test(decision.text);
               this.add(session,'assistant',unsafeClaim?'Para reservar, primero elegí un horario de la agenda y confirmalo.':decision.text);
               session.clarificationCount=unsafeClaim?session.clarificationCount+1:0;
               if(session.clarificationCount>=2&&unsafeClaim){await this.repository.escalate(id,'not_understood');this.add(session,'assistant','Voy a pasarle tu consulta a recepción para que te ayuden.');}
               session.processed.add(input.messageId);return this.get(id);
             }
             if(decision.kind!=='handoff'||decision.reason!=='not_understood')session.clarificationCount=0;
-            if(decision.kind==='availability'){
+            if(decision.kind==='availability'||decision.kind==='reschedule'){
               action='start';filter=normalizeAvailabilitySearch(decision.filter,input.text,localNow,clinic.time_zone,therapists,session.search);
+              if(decision.kind==='reschedule'&&!await this.prepareReschedule(id,session,current,decision.appointmentId,filter)){session.processed.add(input.messageId);return this.get(id);}
             }
             if(decision.kind==='select'){action='select';selectedSlot=decision.slotId;}
             if(decision.kind==='handoff'){
@@ -253,7 +291,7 @@ export class DemoService {
           const clinic = (await this.repository.db.query<{ time_zone: string }>('select time_zone from public.clinics')).rows[0]!;
           const when = new Intl.DateTimeFormat('es-AR', { timeZone: clinic.time_zone, weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',hourCycle:'h23' }).format(new Date(String(selection.starts_at)));
           const missing=missingContact(await this.repository.getPatientDetails(id));
-          verifiedSuffix=`El turno sería con ${selection.therapist} el ${when}. ${missing.length?`Antes de confirmar, necesito tu ${missing.join(' y ')}.`:'¿Lo confirmás?'}`;
+          verifiedSuffix=`${session.rescheduling?'El cambio':'El turno'} sería con ${selection.therapist} el ${when}. ${missing.length?`Antes de confirmar, necesito tu ${missing.join(' y ')}.`:'¿Lo confirmás?'}${session.rescheduling?' Tu reserva actual se mantiene hasta confirmar el cambio.':''}`;
           this.add(session, 'assistant',verifiedSuffix);
           narration={event:'selected',request:text,facts:{booked:false,missing_contact:missing,details_appended_by_backend:true},variables:{}};
           session.choices = [...(!missing.length?[{ label: 'Confirmar turno', action: 'confirm' } as DemoChoice]:[]),{ label: 'Ver otros horarios', action: 'start' }];
@@ -263,20 +301,28 @@ export class DemoService {
           if(missing.length){this.add(session,'assistant',`Para confirmar el turno necesito tu ${missing.join(' y ')}. El horario todavía no está reservado.`);session.processed.add(input.messageId);return this.get(id);}
           const selected=session.offered.find(slot=>slot.id===session.selected);
           const clinic=(await this.repository.db.query<{time_zone:string}>('select time_zone from public.clinics')).rows[0]!;
-          const booked = await this.repository.book(id, session.selected, `demo-${input.messageId}`, true);
+          const moving=session.rescheduling;
+          const booked = moving?await this.repository.rescheduleAppointment(moving.id,session.selected,`chat-${input.messageId}`,{expectedVersion:moving.version,confirmed:true,conversationId:id}):await this.repository.book(id, session.selected, `demo-${input.messageId}`, true);
           if(booked.status!=='confirmed')throw new Error('Unexpected booking status');
           if(selected){
             const when=new Intl.DateTimeFormat('es-AR',{timeZone:clinic.time_zone,weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(selected.start));
             verifiedSuffix=`${when} · ${selected.therapistName}. En esta demo no enviamos correos.`;
           }else verifiedSuffix='En esta demo no enviamos correos.';
-          this.add(session, 'assistant', '¡Listo! Tu turno quedó confirmado y ya aparece en la agenda de la clínica. En esta demo no enviamos correos.');
-          narration={event:'booked',request:text,facts:{booking_succeeded:true,notifications_sent:false,details_appended_by_backend:true},variables:{}};
+          this.add(session, 'assistant', moving?`Tu turno quedó reprogramado. El horario anterior está libre. ${verifiedSuffix}`:'¡Listo! Tu turno quedó confirmado y ya aparece en la agenda de la clínica. En esta demo no enviamos correos.');
+          narration={event:moving?'rescheduled':'booked',request:text,facts:{booking_succeeded:true,notifications_sent:false,details_appended_by_backend:true},variables:{}};
+          session.rescheduling=null;
           session.selected = null;
           session.choices = [{ label: 'Hablar con recepción', action: 'human' }];
         } else {
           session.selected=null;
           await this.repository.db.query("update public.conversations set pending_slot_id=null,pending_expires_at=null where id=$1 and status='active'",[id]);
           const clinic = (await this.repository.db.query<{ time_zone: string }>('select time_zone from public.clinics')).rows[0]!;
+          if(session.rescheduling){
+            const original=current.appointments.find(a=>a.id===session.rescheduling!.id);
+            const therapists=await this.repository.getTherapists();
+            const named=input.text&&therapists.some(t=>input.text!.toLowerCase().includes(String(t.name).toLowerCase().split(' ')[0]!));
+            if(original&&!filter?.therapist_id&&!named&&!/cualquier|cualquiera|sin preferencia|me da igual/i.test(input.text??''))filter={...(filter??session.search??{therapist_id:null,date:null,not_before:null,not_after:null,horizon_days:14}),therapist_id:original.therapistId};
+          }
           const today=Temporal.Now.plainDateISO(clinic.time_zone);
           const fromDate=filter?.date?Temporal.PlainDate.from(filter.date):today;
           session.search=filter??{therapist_id:null,date:null,not_before:null,not_after:null,horizon_days:14};
@@ -284,7 +330,7 @@ export class DemoService {
           const now=fromDate.toZonedDateTime(clinic.time_zone).toInstant().toString();
           const to=fromDate.add({days:filter?.horizon_days??14}).toZonedDateTime(clinic.time_zone).toInstant().toString();
           const therapists = await this.repository.getTherapists();
-          if(filter?.therapist_id&&!therapists.some(t=>t.id===filter.therapist_id))throw new DomainError('SLOT_UNAVAILABLE',409);
+          if(filter?.therapist_id&&!therapists.some(t=>t.id===filter?.therapist_id))throw new DomainError('SLOT_UNAVAILABLE',409);
           const candidates: OfferedSlot[] = [];
           let complete=true;
           const minute=(time:string)=>Number(time.split(':')[0])*60+Number(time.split(':')[1]);
@@ -333,11 +379,12 @@ export class DemoService {
           session.choices.push({ label: 'Hablar con recepción', action: 'human' });
         }
       } catch (error) {
-        if (error instanceof DomainError && ['SLOT_UNAVAILABLE','CONFIRMATION_REQUIRED','AGENT_PAUSED','INVALID_DATE_RANGE'].includes(error.code)) {
+        if (error instanceof DomainError && ['SLOT_UNAVAILABLE','CONFIRMATION_REQUIRED','AGENT_PAUSED','INVALID_DATE_RANGE','APPOINTMENT_CHANGED','APPOINTMENT_NOT_EDITABLE'].includes(error.code)) {
           this.add(session, 'assistant', error.code === 'AGENT_PAUSED' ? 'Recepción está atendiendo esta conversación.' : error.code==='INVALID_DATE_RANGE'?'Elegí una fecha desde hoy y dentro de las próximas seis semanas.':'Ese horario ya no está disponible o necesita una nueva confirmación. Busquemos otro.');
           // Error instructions remain authoritative; avoid rewriting an unverified failure cause.
           narration=null;
           session.selected = null;
+          if(session.rescheduling)this.add(session,'assistant','No se aplicó el cambio. Tu reserva conserva su estado actual.');
           session.choices = [{ label: 'Buscar horarios', action: 'start' },{ label:'Hablar con recepción', action:'human' }];
         } else throw error;
       }
@@ -371,7 +418,7 @@ export class DemoService {
     return this.serial(id,async()=>{
       const result=await this.repository.setConversationArchived(id,archived);
       const session=this.sessions.get(id);
-      if(session){session.selected=null;session.offered=[];session.search=null;session.choices=[{label:'Buscar horarios',action:'start'},{label:'Hablar con recepción',action:'human'}];}
+      if(session){session.selected=null;session.rescheduling=null;session.offered=[];session.search=null;session.choices=[{label:'Buscar horarios',action:'start'},{label:'Hablar con recepción',action:'human'}];}
       return result;
     });
   }
@@ -384,7 +431,7 @@ export class DemoService {
     const from = start.toZonedDateTime(String(clinic.time_zone)).toInstant().toString();
     const to = start.add({ days: 7 }).toZonedDateTime(String(clinic.time_zone)).toInstant().toString();
     const therapists = (await this.repository.getTherapists()).filter(t=>!therapistId||t.id===therapistId);
-    const appointments = (await this.repository.db.query(`select a.id,a.starts_at,a.ends_at,a.therapist_id,a.conversation_id,p.name as patient_name,t.name as therapist_name
+    const appointments = (await this.repository.db.query(`select a.id,a.starts_at,a.ends_at,a.therapist_id,a.conversation_id,a.version,p.name as patient_name,t.name as therapist_name
       from public.appointments a join public.patients p on p.id=a.patient_id join public.therapists t on t.id=a.therapist_id
       where a.status='confirmed' and a.starts_at >= $1 and a.starts_at < $2 and ($3::uuid is null or a.therapist_id=$3) order by a.starts_at`, [from,to,therapistId??null])).rows;
     const slots = (await Promise.all(therapists.map(t => this.repository.getAvailability(String(t.id),from,to)))).flat();

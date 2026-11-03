@@ -16,7 +16,7 @@ export function Simulator({chat,setChat,onChange,onInbox,onDelete}:{chat:Chat|nu
   const send=async(choice?:Choice)=>{
     if(!chat||busy)return;const value=text.trim();if(!choice&&!value)return;
     setBusy(true);setError('');
-    try {setChat(await api<Chat>(`/demo/conversations/${chat.id}/messages`,{messageId:crypto.randomUUID(),...(choice?{action:choice.action,...(choice.slotId?{slotId:choice.slotId}:{})}:{text:value})}));setText('');onChange();}
+    try {setChat(await api<Chat>(`/demo/conversations/${chat.id}/messages`,{messageId:crypto.randomUUID(),...(choice?{action:choice.action,...(choice.slotId?{slotId:choice.slotId}:{}),...(choice.appointmentId?{appointmentId:choice.appointmentId}:{})}:{text:value})}));setText('');onChange();}
     catch(e){setError((e as Error).message);}finally{setBusy(false);}
   };
   const restart=async()=>{setBusy(true);try{const next=await api<Chat>('/demo/conversations',{});sessionStorage.setItem('nexo-demo-chat',next.id);setChat(next);setError('');onChange();}catch(e){setError((e as Error).message);}finally{setBusy(false);}};

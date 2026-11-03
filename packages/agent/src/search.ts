@@ -7,6 +7,11 @@ type Therapist={id:string;name:string;specialty:string};
 const freshSearch=/\b(quiero|quisiera|necesito|busco|buscar|reservar|sacar|gustaria|turnos?|citas?|fisio|fisioterapia|kinesiologia)\b/;
 const refinement=(value:string)=>!freshSearch.test(value)&&/\b(hoy|manana|lunes|martes|miercoles|jueves|viernes|sabado|domingo|semana|la tarde|la noche)\b/.test(value);
 const anyTherapist=/\b(cualquier(?:a)?|cualquiera de los|me da igual|sin preferencia|todos los|no importa (?:el|quien))\b/;
+export function isRescheduleRequest(text:string){
+  const value=normalized(text);
+  if(/\bno (?:quiero|necesito|deseo|hay que|lo|me lo)?\s*(?:cambiar|cambies|reprogramar|reprogrames|mover)\b/.test(value))return false;
+  return /\b(reprogram\w*|cambiar|cambiamos|cambialo|cambiame|cambio de|mover|movemos|muevas|pasar (?:el|mi) turno)\b/.test(value);
+}
 /** Resolve only complete, unqualified ordinal choices against the actual offered list. */
 export function offeredSelection(text:string,offered:readonly {id:string}[]):string|null {
   const value=normalized(text).replace(/[¿?¡!.,;:]+/g,' ').replace(/\s+/g,' ').trim();

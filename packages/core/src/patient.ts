@@ -19,6 +19,19 @@ export function patientSummary(p:PatientDetails) {
     p.additional_info?`Información adicional: ${p.additional_info}.`:null].filter(Boolean).join('\n');
 }
 const normalize=(v:string)=>v.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+/** Store only explicit patient statements, without deriving a diagnosis or answering advice. */
+export function explicitPatientInfo(message:string):PatientPatch|null {
+  const value=normalize(message);
+  if(/[?¿]/.test(message)||/\b(que hago|que debo|que recomendas|que me recomendas|como (?:trato|curo)|deberia|es grave|ejercicios|recomiend|tratamiento|urgente|urgencia)\b/.test(value))return null;
+  const diagnosis=message.match(/\b(?:mi |el )?diagn[oó]stico\s*(?:es\s+|:\s*)(.+)$/i)
+    ??message.match(/\b(?:me diagnosticaron|me dijeron que tengo|tengo diagnosticad[oa])\s+(.+)$/i);
+  if(diagnosis?.[1]&&diagnosis[1].length<=400)return {reported_reason:diagnosis[1].trim()};
+  const info=message.match(/\b(?:informaci[oó]n (?:relevante|adicional)|dato (?:relevante|adicional))\s*:\s*(.+)$/i)
+    ??message.match(/\b(?:anot[aá]|guard[aá]|ten[eé] en cuenta)\s+(?:que\s+)?(.+)$/i);
+  if(info?.[1]&&info[1].length<=600&&!/\b(turno|horario|cancel|reserv|reprogram|cambi|confirm|prompt|instruccion)\b/.test(normalize(info[1])))return {additional_info:info[1].trim()};
+  if(/^(?:ademas[, ]+|por cierto[, ]+)?(?:tengo|sufro|padezco|presento)\b/.test(value)&&/\b(dolor|molestia|lesion|lumbalgia|tendinitis|esguince|hernia|fractura)\b/.test(value)&&message.length<=400)return {reported_reason:message.trim()};
+  return null;
+}
 /** Extracted facts must occur in the latest patient message, never in instructions/history. */
 export function groundedPatientPatch(details:Record<string,string|null>,message:string):PatientPatch {
   const patch:Record<string,string>={};
