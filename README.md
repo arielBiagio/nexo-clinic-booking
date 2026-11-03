@@ -13,6 +13,7 @@
 - Historial de mensajes y contexto de reservas persistentes, con protección contra mensajes duplicados.
 - Reservas por Telegram en chats privados de prueba, con botones y respuestas de recepción.
 - Reprogramación por chat o desde la agenda, conservando la reserva y los datos del paciente.
+- Cancelación por chat con elección del turno y confirmación explícita.
 - Contador de mensajes sin leer en la pestaña, con avisos del navegador opcionales.
 - Configuración de jornadas, descansos, duración de sesiones y ausencias.
 - Cancelación y restauración de turnos; archivo y recuperación de conversaciones.

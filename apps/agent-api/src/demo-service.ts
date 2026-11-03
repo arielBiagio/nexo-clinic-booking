@@ -3,17 +3,19 @@ import { Temporal } from '@js-temporal/polyfill';
 import { ClinicRepository, DomainError } from '../../../packages/db/src/repository.js';
 import { withSavepoints } from '../../../packages/db/src/savepoints.js';
 import { isExplicitConfirmation, ProviderError, type AvailabilityInput, type IntentModel, type OfferedSlot } from '../../../packages/agent/src/openrouter.js';
-import { normalizeAvailabilitySearch, requestedLocalTime, offeredSelection, rejectsSelectedSlot } from '../../../packages/agent/src/search.js';
+import { normalizeAvailabilitySearch, requestedLocalTime, offeredSelection, rejectsSelectedSlot,isCancellationRequest,isCancellationConfirmation,isRescheduleRequest } from '../../../packages/agent/src/search.js';
+import { requestedLocalDate } from '../../../packages/agent/src/calendar.js';
 import { renderNarration, type NarrationContext } from '../../../packages/agent/src/narration.js';
 import { groundedPatientPatch, missingContact, explicitPatientInfo,type PatientDetails } from '../../../packages/core/src/patient.js';
 
 export interface DemoMessage { id: string; role: 'patient' | 'assistant' | 'staff'; text: string; at: string }
-export interface DemoChoice { label: string; action: 'start' | 'more' | 'select' | 'confirm' | 'human'|'reschedule'; slotId?: string;appointmentId?:string }
+export type ChatAction='start'|'more'|'select'|'confirm'|'human'|'reschedule'|'cancel'|'confirm_cancel'|'keep';
+export interface DemoChoice { label: string; action: ChatAction; slotId?: string;appointmentId?:string }
 interface UpcomingAppointment {id:string;therapistId:string;therapistName:string;start:string;end:string;version:number}
 export interface ChatView {id:string;status:string;name:string;messages:DemoMessage[];choices:DemoChoice[];patient:PatientDetails;hasAppointment:boolean;appointments:UpcomingAppointment[];ai:{provider:string;model:string|null;error:string|null}}
-interface Session { messages: DemoMessage[]; choices: DemoChoice[]; selected: string | null; processed: Set<string>; offered:OfferedSlot[]; modelRequests:number; clarificationCount:number; providerError:string|null;search:AvailabilityInput|null;rescheduling:{id:string;version:number}|null }
+interface Session { messages: DemoMessage[]; choices: DemoChoice[]; selected: string | null; processed: Set<string>; offered:OfferedSlot[]; modelRequests:number;modelWindowStart:number; clarificationCount:number; providerError:string|null;search:AvailabilityInput|null;rescheduling:{id:string;version:number}|null;cancellation:{id:string;version:number;expiresAt:number}|null }
 type StoredSession = Omit<Session,'messages'|'selected'|'processed'> & {processed:string[]; inputs:[string,string][]};
-export interface ChatInput { messageId: string; text?: string | undefined; action?: 'start' | 'more' | 'select' | 'confirm' | 'human'|'reschedule' | undefined; slotId?: string | undefined;appointmentId?:string|undefined }
+export interface ChatInput { messageId: string; text?: string | undefined; action?: ChatAction|undefined; slotId?: string | undefined;appointmentId?:string|undefined }
 
 export class DemoService {
   readonly sessions = new Map<string, Session>();
@@ -23,12 +25,16 @@ export class DemoService {
   constructor(readonly repository: ClinicRepository, private readonly intentModel?:IntentModel, private readonly scoped=false) {}
 
   private async loadSession(id:string,pending:string|null) {
-    const stored=(await this.repository.db.query<{state:StoredSession}>('select state from private.conversation_runtime where conversation_id=$1',[id])).rows[0]?.state;
+    const row=(await this.repository.db.query<{state:StoredSession|null;created_at:Date|string}>(`select r.state,c.created_at from public.conversations c
+      left join private.conversation_runtime r on r.conversation_id=c.id where c.id=$1`,[id])).rows[0];
+    const stored=row?.state;
+    const windowStart=stored?.modelWindowStart??new Date(row?.created_at??Date.now()).getTime();
+    const expired=Date.now()-windowStart>=3_600_000;
     const messages=(await this.repository.db.query<{id:string;role:DemoMessage['role'];body:string;created_at:Date|string}>(
       'select id,role,body,created_at from public.messages where conversation_id=$1 and body is not null order by sequence',[id])).rows.map(row=>({id:row.id,role:row.role,text:row.body,at:new Date(row.created_at).toISOString()}));
     const session:Session={messages,choices:stored?.choices??[{label:'Buscar horarios',action:'start'},{label:'Hablar con recepción',action:'human'}],
-      selected:pending,processed:new Set(stored?.processed??[]),offered:stored?.offered??[],modelRequests:stored?.modelRequests??0,
-      clarificationCount:stored?.clarificationCount??0,providerError:stored?.providerError??null,search:stored?.search??null,rescheduling:stored?.rescheduling??null};
+      selected:pending,processed:new Set(stored?.processed??[]),offered:stored?.offered??[],modelRequests:expired?0:stored?.modelRequests??0,modelWindowStart:expired?Date.now():windowStart,
+      clarificationCount:stored?.clarificationCount??0,providerError:expired&&stored?.providerError==='RATE_LIMIT'?null:stored?.providerError??null,search:stored?.search??null,rescheduling:stored?.rescheduling??null,cancellation:stored?.cancellation??null};
     for(const [key,value] of stored?.inputs??[])this.inputs.set(key,value);
     this.sessions.set(id,session);
     return session;
@@ -113,6 +119,20 @@ export class DemoService {
     return this.get(conversation);
   }
 
+  async continueArchived(id:string){
+    const next=await this.repository.db.transaction(async db=>{
+      const patient=await this.repository.getConversationPatientId(id,db);await db.query('select id from public.patients where id=$1 for update',[patient]);
+      const old=(await db.query('select identity_id,archived_at from public.conversations where id=$1 for update',[id])).rows[0]!;
+      if(!old.archived_at)throw new DomainError('CONVERSATION_NOT_ARCHIVED',409);
+      const conversation=randomUUID();await db.query('insert into public.conversations(id,identity_id) values ($1,$2)',[conversation,old.identity_id]);
+      const service=new DemoService(new ClinicRepository(withSavepoints(db)),this.intentModel,true),session=await service.loadSession(conversation,null);
+      service.add(session,'assistant','Retomamos la consulta con tu ficha y tus reservas guardadas. ¿Querés reservar, cambiar o cancelar un turno?');
+      session.choices=[{label:'Buscar horarios',action:'start'},{label:'Cambiar un turno',action:'reschedule'},{label:'Cancelar un turno',action:'cancel'},{label:'Hablar con recepción',action:'human'}];
+      await service.saveSession(conversation,session);return conversation;
+    });
+    return this.get(next);
+  }
+
   async get(id: string):Promise<ChatView> {
     if(!this.scoped)return this.stored(id,service=>service.get(id));
     const row = (await this.repository.db.query(`select c.id,c.status,p.name,
@@ -125,6 +145,9 @@ export class DemoService {
       session=await this.loadSession(id,row.pending_slot_id?String(row.pending_slot_id):null);
     }
     const appointments=(await this.repository.getUpcomingAppointments(id)).map(a=>({id:a.id,therapistId:a.therapist_id,therapistName:a.therapist_name,start:new Date(a.starts_at).toISOString(),end:new Date(a.ends_at).toISOString(),version:a.version}));
+    if(session.cancellation&&(session.cancellation.expiresAt<=Date.now()||!appointments.some(a=>a.id===session.cancellation!.id&&a.version===session.cancellation!.version))){
+      session.cancellation=null;session.choices=[{label:'Revisar mis turnos para cancelar',action:'cancel'},{label:'Hablar con recepción',action:'human'}];
+    }
     if(session.rescheduling&&!appointments.some(a=>a.id===session.rescheduling!.id&&a.version===session.rescheduling!.version)){
       session.rescheduling=null;session.selected=null;session.offered=[];session.choices=[{label:'Buscar horarios',action:'start'}];row.pending_slot_id=null;
       await this.repository.db.query('update public.conversations set pending_slot_id=null,pending_expires_at=null where id=$1',[id]);
@@ -139,6 +162,7 @@ export class DemoService {
   }
 
   private async prepareReschedule(id:string,session:Session,current:ChatView,appointmentId:string|null,filter:AvailabilityInput|null) {
+    session.cancellation=null;
     const target=appointmentId?current.appointments.find(a=>a.id===appointmentId):current.appointments.length===1?current.appointments[0]:null;
     session.selected=null;session.offered=[];
     await this.repository.db.query('update public.conversations set pending_slot_id=null,pending_expires_at=null where id=$1',[id]);
@@ -153,6 +177,29 @@ export class DemoService {
     return true;
   }
 
+  private async prepareCancellation(id:string,session:Session,current:ChatView,appointmentId:string|null,text:string){
+    session.cancellation=null;session.rescheduling=null;session.selected=null;session.offered=[];session.providerError=null;
+    await this.repository.db.query('update public.conversations set pending_slot_id=null,pending_expires_at=null where id=$1',[id]);
+    const zone=(await this.repository.db.query<{time_zone:string}>('select time_zone from public.clinics')).rows[0]!.time_zone;
+    const when=(a:UpcomingAppointment)=>new Intl.DateTimeFormat('es-AR',{timeZone:zone,weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(a.start));
+    let candidates=current.appointments;
+    if(appointmentId)candidates=candidates.filter(a=>a.id===appointmentId);
+    else{
+      let day:string|null=null;try{day=requestedLocalDate(text,Temporal.Now.instant().toString(),zone);}catch{/* Ask the patient to choose rather than guess an invalid date. */}
+      const time=requestedLocalTime(text);
+      if(day||time)candidates=candidates.filter(a=>{const start=Temporal.Instant.from(a.start).toZonedDateTimeISO(zone);return (!day||start.toPlainDate().toString()===day)&&(!time||`${String(start.hour).padStart(2,'0')}:${String(start.minute).padStart(2,'0')}`===time);});
+    }
+    const target=candidates.length===1?candidates[0]:null;
+    if(!target){
+      this.add(session,'assistant',!current.appointments.length?'No encuentro turnos futuros confirmados vinculados a tu ficha.':candidates.length?'¿Cuál de tus turnos querés cancelar?':'No encuentro un turno que coincida con esa fecha u horario. Elegí cuál querés cancelar:');
+      session.choices=(candidates.length?candidates:current.appointments).map(a=>({label:`Cancelar ${when(a)} · ${a.therapistName}`,action:'cancel',appointmentId:a.id}));
+      session.choices.push({label:'Mantener mis turnos',action:'keep'});return;
+    }
+    session.cancellation={id:target.id,version:target.version,expiresAt:Date.now()+600_000};
+    this.add(session,'assistant',`Tu turno es el ${when(target)} con ${target.therapistName}. ¿Confirmás que querés cancelarlo?`);
+    session.choices=[{label:'Sí, cancelar este turno',action:'confirm_cancel'},{label:'Cambiar de horario',action:'reschedule',appointmentId:target.id},{label:'Mantener el turno',action:'keep'}];
+  }
+
   async send(id: string, input: ChatInput):Promise<ChatView> {
     if(!this.scoped)return this.stored(id,service=>service.send(id,input),{key:input.messageId,payload:{kind:'patient',text:input.text??null,action:input.action??null,slotId:input.slotId??null,...(input.appointmentId?{appointmentId:input.appointmentId}:{})}});
     return this.serial(id, async () => {
@@ -162,18 +209,41 @@ export class DemoService {
       if (session.processed.has(input.messageId)) return this.get(id);
       if (session.messages.length > 120) throw new DomainError('DEMO_LIMIT_REACHED', 409);
       let action = input.action ?? (/recepci[oó]n|humano|persona|ayuda|factura|dolor|m[eé]dic/i.test(input.text ?? '') ? 'human' : 'start');
-      const text = input.text ?? ({ start: 'Quiero reservar un turno',more:'Buscar en los próximos días', select: 'Ese horario me sirve', confirm: 'Sí, confirmo el turno', human: 'Quiero hablar con recepción',reschedule:'Quiero cambiar ese turno' }[action]);
+      const text = input.text ?? ({ start: 'Quiero reservar un turno',more:'Buscar en los próximos días', select: 'Ese horario me sirve', confirm: 'Sí, confirmo el turno', human: 'Quiero hablar con recepción',reschedule:'Quiero cambiar ese turno',cancel:'Quiero cancelar ese turno',confirm_cancel:'Sí, confirmo la cancelación',keep:'Mantener mis turnos' }[action]);
       // Only this conversation's persisted transcript is supplied to the model.
       this.add(session, 'patient', text);
+      const pendingCancellation=session.cancellation;
+      if(input.text&&!isCancellationConfirmation(input.text)){session.cancellation=null;session.choices=session.choices.filter(c=>c.action!=='confirm_cancel');}
       const explicitInfo=input.text?explicitPatientInfo(input.text):null;
       if(explicitInfo){
         await this.repository.updatePatientDetails(id,explicitInfo);
         if(current.status==='active')this.add(session,'assistant',explicitInfo.reported_reason?'Guardé lo que me contaste como motivo referido por vos, sin verificación clínica.':'Guardé esa información en tu ficha.');
-        session.processed.add(input.messageId);return this.get(id);
+        if(current.status!=='active'||!isCancellationRequest(input.text??'')){session.processed.add(input.messageId);return this.get(id);}
       }
       if (current.status !== 'active') {
         session.processed.add(input.messageId);
         return this.get(id);
+      }
+      const keep=input.action==='keep'||pendingCancellation&&input.text&&/^(?:no(?: gracias)?[.!]?$|no[, ]+(?:lo |la )?canceles|no quiero cancelar|mejor no\b|manten|dejalo)/i.test(input.text.trim());
+      if(keep){
+        session.cancellation=null;session.choices=[{label:'Buscar horarios',action:'start'},{label:'Hablar con recepción',action:'human'}];
+        this.add(session,'assistant','Tus reservas se mantienen. No cancelé ningún turno.');session.processed.add(input.messageId);return this.get(id);
+      }
+      if(input.action==='confirm_cancel'||pendingCancellation&&input.text&&isCancellationConfirmation(input.text)){
+        const pending=session.cancellation;
+        if(!pending||pending.expiresAt<=Date.now())this.add(session,'assistant','La confirmación de cancelación venció o el turno cambió. Elegí nuevamente el turno que querés cancelar.');
+        else{
+          try{await this.repository.cancelPatientAppointment(pending.id,id,pending.version);this.add(session,'assistant','Tu turno quedó cancelado y ese horario volvió a estar disponible.');}
+          catch(error){if(!(error instanceof DomainError))throw error;this.add(session,'assistant',error.code==='DELIVERY_IN_PROGRESS'?'Hay una operación en curso y no pude completar la cancelación. Intentá nuevamente en unos momentos.':'El turno cambió o ya no permite esa cancelación. No cancelé otra reserva.');}
+        }
+        session.cancellation=null;session.choices=[{label:'Buscar horarios',action:'start'},{label:'Elegir otro turno para cancelar',action:'cancel'},{label:'Hablar con recepción',action:'human'}];
+        session.processed.add(input.messageId);return this.get(id);
+      }
+      const cancellationChoices=session.choices.filter(c=>c.action==='cancel'&&c.appointmentId);
+      const ordinalCancellation=input.text?offeredSelection(input.text,cancellationChoices.map(c=>({id:c.appointmentId!}))):null;
+      if(input.action==='cancel'||!input.action&&input.text&&(isCancellationRequest(input.text)||ordinalCancellation||cancellationChoices.length&&!isRescheduleRequest(input.text)&&!/(recepci[oó]n|humano|persona)/i.test(input.text))){
+        await this.prepareCancellation(id,session,current,input.appointmentId??ordinalCancellation??null,input.text??'');
+        session.processed.add(input.messageId);return this.get(id);
       }
       // A rejected selection must not survive a later ambiguous "sí".
       if(session.selected&&input.text&&rejectsSelectedSlot(input.text)){
@@ -210,6 +280,9 @@ export class DemoService {
               offered:session.offered,selectedSlotId:session.selected,history:session.messages.map(m=>({role:m.role,text:m.text}))});
             session.providerError=null;
             if((await this.get(id)).status!=='active'){session.processed.add(input.messageId);return this.get(id);}
+            if(decision.kind==='cancel'){
+              await this.prepareCancellation(id,session,current,decision.appointmentId,input.text);session.processed.add(input.messageId);return this.get(id);
+            }
             if(decision.kind==='patient'){
               let intake:NarrationContext|null=null;
               let suffix='';
@@ -238,7 +311,7 @@ export class DemoService {
             }
             if(decision.kind==='reply'){
               // Only successful backend operations may announce concrete appointments or times.
-              const unsafeClaim=/\b(reservad[oa]s?|confirmad[oa]s?|agendad[oa]s?|reprogramad[oa]s?|reprogram[eé]|cambi[eé]|cambiad[oa]s?|mov[ií]|booked|confirmed|scheduled|rescheduled|guard[eé]|guardad[oa]s?|actualic[eé]|actualizad[oa]s?|registr[eé])\b|te agend[eé]|\b\d{1,2}:\d{2}\b/i.test(decision.text);
+              const unsafeClaim=/\b(reservad[oa]s?|confirmad[oa]s?|agendad[oa]s?|cancelad[oa]s?|cancel[eé]|cancelled|canceled|reprogramad[oa]s?|reprogram[eé]|cambi[eé]|cambiad[oa]s?|mov[ií]|booked|confirmed|scheduled|rescheduled|guard[eé]|guardad[oa]s?|actualic[eé]|actualizad[oa]s?|registr[eé])\b|te agend[eé]|\b\d{1,2}:\d{2}\b/i.test(decision.text);
               this.add(session,'assistant',unsafeClaim?'Para reservar, primero elegí un horario de la agenda y confirmalo.':decision.text);
               session.clarificationCount=unsafeClaim?session.clarificationCount+1:0;
               if(session.clarificationCount>=2&&unsafeClaim){await this.repository.escalate(id,'not_understood');this.add(session,'assistant','Voy a pasarle tu consulta a recepción para que te ayuden.');}
@@ -265,6 +338,12 @@ export class DemoService {
               session.processed.add(input.messageId);return this.get(id);
             }
           }catch(error){
+            if(error instanceof ProviderError&&error.code==='RATE_LIMIT'){
+              session.providerError='RATE_LIMIT';
+              this.add(session,'assistant','Se alcanzó un límite temporal de consultas a la IA. Podés seguir con los botones para buscar horarios, cambiar o cancelar una reserva.');
+              session.choices=[{label:'Buscar horarios',action:'start'},...(current.appointments.length?[{label:'Cambiar un turno',action:'reschedule'} as DemoChoice,{label:'Cancelar un turno',action:'cancel'} as DemoChoice]:[]),{label:'Hablar con recepción',action:'human'}];
+              session.processed.add(input.messageId);return this.get(id);
+            }
             if(error instanceof ProviderError&&error.code==='INVALID_RESPONSE'){
               session.providerError=null;
               this.add(session,'assistant','No pude interpretar bien esa respuesta. ¿Qué día o franja horaria te conviene? También podés consultar los próximos horarios con el botón.');
@@ -421,7 +500,7 @@ export class DemoService {
     return this.serial(id,async()=>{
       const result=await this.repository.setConversationArchived(id,archived);
       const session=this.sessions.get(id);
-      if(session){session.selected=null;session.rescheduling=null;session.offered=[];session.search=null;session.choices=[{label:'Buscar horarios',action:'start'},{label:'Hablar con recepción',action:'human'}];}
+      if(session){session.selected=null;session.rescheduling=null;session.cancellation=null;session.offered=[];session.search=null;session.choices=[{label:'Buscar horarios',action:'start'},{label:'Hablar con recepción',action:'human'}];}
       return result;
     });
   }

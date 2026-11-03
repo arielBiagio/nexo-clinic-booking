@@ -7,6 +7,15 @@ type Therapist={id:string;name:string;specialty:string};
 const freshSearch=/\b(quiero|quisiera|necesito|busco|buscar|reservar|sacar|gustaria|turnos?|citas?|fisio|fisioterapia|kinesiologia)\b/;
 const refinement=(value:string)=>!freshSearch.test(value)&&/\b(hoy|manana|lunes|martes|miercoles|jueves|viernes|sabado|domingo|semana|la tarde|la noche)\b/.test(value);
 const anyTherapist=/\b(cualquier(?:a)?|cualquiera de los|me da igual|sin preferencia|todos los|no importa (?:el|quien))\b/;
+export function isCancellationRequest(text:string){
+  const value=normalized(text);
+  if(/\b(?:no (?:quiero |deseo |necesito |lo |la )?|sin |en vez de |do not |don't )cancel(?:ar|es|a)?\b/.test(value))return false;
+  return /\b(cancel(?:ar|o|a|alo|ame|emos|en|acion)?|anul(?:ar|o|a|alo)|dar de baja (?:el|mi) turno)\b/.test(value);
+}
+export function isCancellationConfirmation(text:string){
+  const value=normalized(text).replace(/[¡!¿?,.;:]/g,' ').replace(/\s+/g,' ').trim();
+  return /^(si(?: confirmo)?(?: la cancelacion| cancelalo| cancelalo por favor| cancelar| cancela el turno| quiero cancelarlo)?|confirmo (?:la cancelacion|cancelar(?: el turno)?)|cancelalo(?: por favor)?|dale|ok|okay|confirmo|yes cancel(?: it)?)$/.test(value);
+}
 export function isRescheduleRequest(text:string){
   const value=normalized(text);
   if(/\bno (?:quiero|necesito|deseo|hay que|lo|me lo)?\s*(?:cambiar|cambies|reprogramar|reprogrames|mover)\b/.test(value))return false;

@@ -67,7 +67,14 @@ export class TelegramService {
       await this.notice(db,chat.id,'Prueba de reservas: usá datos ficticios. Podés escribir qué día y franja horaria te convienen.');
       return empty;
     }
-    if(peer.archived_at)return {callback:'Esta conversación está archivada.',notice:{userId,text:'Recepción archivó esta conversación. Contactá al equipo para que la reabra.'}};
+    if(peer.archived_at){
+      if(update.message&&/^\/start(?:@\w+)?(?:\s|$)/.test(text)){
+        const next=await service.continueArchived(peer.conversation_id);
+        await db.query('update private.telegram_peers set conversation_id=$3 where bot_id=$1 and user_id=$2',[this.botId,userId,next.id]);
+        return empty;
+      }
+      return {callback:'Esta conversación está archivada. Escribí /start.',notice:{userId,text:'La conversación anterior está archivada. Escribí /start para continuar con tu misma ficha y tus reservas guardadas.'}};
+    }
     const key=createHash('sha256').update(`telegram:${this.botId}:${update.update_id}`).digest('hex');
     const messageId=`${key.slice(0,8)}-${key.slice(8,12)}-4${key.slice(13,16)}-8${key.slice(17,20)}-${key.slice(20,32)}`;
     let input:ChatInput|null=null;
@@ -83,7 +90,9 @@ export class TelegramService {
       if(!choice||!current.choices.some(c=>c.action===choice.action&&c.slotId===choice.slotId&&c.appointmentId===choice.appointmentId))return {callback:'Ese botón venció. Usá las últimas opciones o escribí qué turno buscás.',notice:null};
       input={messageId,action:choice.action,...(choice.slotId?{slotId:choice.slotId}:{}),...(choice.appointmentId?{appointmentId:choice.appointmentId}:{})};
     }else if(/^\/start(?:@\w+)?(?:\s|$)/.test(text)||/^\/help(?:@\w+)?$/.test(text)){
-      await this.notice(db,peer.conversation_id,'Podés pedir un turno indicando el día y la franja, por ejemplo: «Quiero fisio el viernes por la tarde». Para hablar con alguien, escribí «recepción».');
+      await db.query('update public.conversations set pending_slot_id=null,pending_expires_at=null where id=$1',[peer.conversation_id]);
+      await db.query(`update private.conversation_runtime set state=state||'{"cancellation":null,"rescheduling":null,"offered":[],"choices":[{"label":"Buscar horarios","action":"start"},{"label":"Cambiar un turno","action":"reschedule"},{"label":"Cancelar un turno","action":"cancel"},{"label":"Hablar con recepción","action":"human"}]}'::jsonb where conversation_id=$1`,[peer.conversation_id]);
+      await this.notice(db,peer.conversation_id,'Podés reservar indicando día y franja, pedir cambiar un turno o cancelar una reserva. Antes de cancelar te pediré que elijas el turno y confirmes. Para hablar con alguien, escribí «recepción».');
       return empty;
     }else if(!text||text.length>500){
       await this.notice(db,peer.conversation_id,'Por ahora puedo leer mensajes de texto de hasta 500 caracteres. Escribí qué día o franja horaria te conviene.');return empty;

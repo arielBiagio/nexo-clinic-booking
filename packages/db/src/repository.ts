@@ -2,6 +2,7 @@ import { Temporal } from '@js-temporal/polyfill';
 import { randomUUID } from 'node:crypto';
 import { generateSlots, type WorkingRule } from '../../core/src/availability.js';
 import type { Sql } from './client.js';
+import { withSavepoints } from './savepoints.js';
 import { patientDetailsInput, patientSummary, type PatientDetails, type PatientPatch } from '../../core/src/patient.js';
 
 export class DomainError extends Error {
@@ -266,6 +267,26 @@ export class ClinicRepository {
       await db.query('insert into private.audit_events(conversation_id,action,entity_id) values ($1,$2,$3)',[meta.conversation_id,removed?'appointment_cancelled':'appointment_restored',appointmentId]);
       return {id:appointmentId,status};
     });}catch(error){return translateDatabaseError(error);}
+  }
+
+  async cancelPatientAppointment(appointmentId:string,conversationId:string,expectedVersion:number){
+    return this.db.transaction(async db=>{
+      const patient=await this.getConversationPatientId(conversationId,db);
+      await db.query('select id from public.patients where id=$1 for update',[patient]);
+      const meta=(await db.query('select patient_id,conversation_id from public.appointments where id=$1',[appointmentId])).rows[0];
+      if(!meta||meta.patient_id!==patient)throw new DomainError('FORBIDDEN',403);
+      const conversations=[...new Set([conversationId,String(meta.conversation_id)])];
+      await db.query('select id from public.conversations where id=any($1::uuid[]) order by id for update',[conversations]);
+      const current=(await db.query('select status,archived_at from public.conversations where id=$1',[conversationId])).rows[0]!;
+      if(current.status!=='active'||current.archived_at)throw new DomainError('AGENT_PAUSED',409);
+      const row=(await db.query('select patient_id,status,version,starts_at from public.appointments where id=$1 for update',[appointmentId])).rows[0]!;
+      if(row.patient_id!==patient)throw new DomainError('FORBIDDEN',403);
+      if(row.version!==expectedVersion)throw new DomainError('APPOINTMENT_CHANGED',409);
+      if(row.status!=='confirmed'||Date.parse(iso(row.starts_at))<=Date.now())throw new DomainError('APPOINTMENT_NOT_EDITABLE',409);
+      const result=await new ClinicRepository(withSavepoints(db)).setAppointmentRemoved(appointmentId,true);
+      await db.query('update public.conversations set pending_slot_id=null,pending_expires_at=null where id=any($1::uuid[])',[conversations]);
+      return result;
+    });
   }
 
   async setConversationArchived(conversationId:string,archived:boolean) {
