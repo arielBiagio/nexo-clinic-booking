@@ -10,8 +10,8 @@ export function AuthGate(){
   const load=async()=>{
     setLoading(true);setError('');
     try{
-      const status=await api<{mode:'staff'|'demo';setupRequired:boolean}>('/auth/status');setMode(status.mode);setSetup(status.setupRequired);
-      try{const session=await api<{user:StaffUser}>('/auth/me');setUser(session.user);}catch{setUser(null);}
+      const session=await api<{mode:'staff'|'demo';setupRequired:boolean;user:StaffUser|null}>('/auth/session');
+      setMode(session.mode);setSetup(session.setupRequired);setUser(session.user);
     }catch(e){setError((e as Error).message);}finally{setLoading(false);}
   };
   useEffect(()=>{void load();const expired=()=>{setUser(null);setPassword('');setError('Tu sesión terminó. Ingresá nuevamente.');};window.addEventListener('nexo-auth-required',expired);return()=>window.removeEventListener('nexo-auth-required',expired);},[]);

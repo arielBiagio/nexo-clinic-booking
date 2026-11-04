@@ -35,7 +35,7 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
     if(options.auth){
       if(host!==options.auth.origin.host)throw new DomainError('HOST_NOT_ALLOWED',403);
       options.auth.assertOrigin(request);
-      if(['/v1/auth/status','/v1/auth/login','/v1/auth/setup','/v1/auth/logout'].includes(pathname??''))return;
+      if(['/v1/auth/status','/v1/auth/session','/v1/auth/login','/v1/auth/setup','/v1/auth/logout'].includes(pathname??''))return;
       request.staff=await options.auth.authenticate(request);
       if(pathname?.startsWith('/v1/staff')&&request.staff.role!=='admin')throw new DomainError('FORBIDDEN',403);
       if(request.staff.role==='therapist'){
@@ -56,7 +56,7 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
       }
       return;
     }
-    if(pathname==='/v1/auth/status'||pathname==='/v1/auth/me')return;
+    if(pathname==='/v1/auth/status'||pathname==='/v1/auth/session'||pathname==='/v1/auth/me')return;
     const authorization = request.headers.authorization ?? '';
     if (timingSafeEqual(digest(authorization), digest(`Bearer ${token}`))) return;
     const cookie = request.headers.cookie?.split(';').map(value=>value.trim()).find(value=>value.startsWith('nexo_demo='))?.slice('nexo_demo='.length) ?? '';
@@ -65,6 +65,13 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
       return;
     }
     return reply.code(401).send({ error: 'UNAUTHORIZED' });
+  });
+  app.addHook('onSend',async(request,reply,payload)=>{
+    // Vite fingerprints these public files; private responses and HTML stay no-store.
+    if(options.dashboardDirectory&&(reply.statusCode===200||reply.statusCode===304)&&/^\/assets\/[^/]+-[\w-]{8,}\.(?:js|css|woff2?)$/.test(request.url.split('?')[0]??'')){
+      reply.header('Cache-Control','public, max-age=31536000, immutable');
+    }
+    return payload;
   });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof z.ZodError) return reply.code(400).send({ error: 'INVALID_INPUT' });
@@ -78,6 +85,7 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
   if(options.auth)options.auth.register(app);
   else{
     app.get('/v1/auth/status',async()=>({mode:'demo',setupRequired:false}));
+    app.get('/v1/auth/session',async()=>({mode:'demo',setupRequired:false,user:{id:'local',name:'Admin',email:'',role:'admin',therapistId:null}}));
     app.get('/v1/auth/me',async()=>({mode:'demo',user:{id:'local',name:'Admin',email:'',role:'admin',therapistId:null}}));
   }
   app.get('/v1/therapists', async request => (await repository.getTherapists()).filter(t=>request.staff?.role!=='therapist'||t.id===request.staff.therapistId));

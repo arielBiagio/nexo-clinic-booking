@@ -21,6 +21,7 @@ export class StaffAuth {
   readonly origin:URL;
   private readonly key:Buffer;
   private readonly attempts=new Map<string,{count:number;until:number}>();
+  private readonly userChecks=new Map<string,Promise<string>>();
   constructor(private readonly db:Sql,private readonly options:{url:string;publishableKey:string;secretKey:string;encryptionKey:string;origin:string;bootstrapEmail:string}){
     this.origin=new URL(options.origin);
     if(this.origin.protocol!=='https:'&&!this.isLocal)throw new Error('Staff origin requires HTTPS');
@@ -45,6 +46,18 @@ export class StaffAuth {
     if(!row||row.role==='therapist'&&!row.therapist_id)throw new DomainError('STAFF_ACCESS_REQUIRED',403);
     return {id:row.user_id,email:row.email,name:row.display_name,role:row.role,therapistId:row.therapist_id};
   }
+  private async verifiedUserId(accessToken:string):Promise<string>{
+    // Share only a currently running provider check. Never cache completed identity or role checks.
+    const key=hash(accessToken),pending=this.userChecks.get(key);
+    if(pending)return pending;
+    const check=(async()=>{
+      const {data,error}=await this.client().auth.getUser(accessToken);
+      if(error||!data.user||data.user.is_anonymous)throw new DomainError('UNAUTHORIZED',401);
+      return data.user.id;
+    })();
+    this.userChecks.set(key,check);
+    try{return await check;}finally{this.userChecks.delete(key);}
+  }
   async authenticate(request:FastifyRequest):Promise<StaffPrincipal>{
     const raw=cookieValue(request);if(!/^[A-Za-z0-9_-]{43}$/.test(raw))throw new DomainError('UNAUTHORIZED',401);
     const row=(await this.db.query<{user_id:string;encrypted_tokens:string}>(`select user_id,encrypted_tokens from private.staff_sessions where id_hash=$1 and expires_at>now()`,[hash(raw)])).rows[0];
@@ -64,8 +77,7 @@ export class StaffAuth {
         return next;
       });
     }
-    const {data,error}=await this.client().auth.getUser(tokens.access_token);
-    if(error||data.user?.id!==row.user_id||data.user.is_anonymous)throw new DomainError('UNAUTHORIZED',401);
+    if(await this.verifiedUserId(tokens.access_token)!==row.user_id)throw new DomainError('UNAUTHORIZED',401);
     return this.principal(row.user_id);
   }
   private async login(email:string,password:string,reply:FastifyReply){
@@ -107,6 +119,13 @@ export class StaffAuth {
   private requireAdmin(request:FastifyRequest){if(request.staff?.role!=='admin')throw new DomainError('FORBIDDEN',403);}
   register(app:FastifyInstance){
     app.get('/v1/auth/status',async()=>({mode:'staff',setupRequired:await this.bootstrapNeeded()}));
+    app.get('/v1/auth/session',async request=>{
+      try{return {mode:'staff',setupRequired:false,user:await this.authenticate(request)};}
+      catch(error){
+        if(!(error instanceof DomainError)||!['UNAUTHORIZED','STAFF_ACCESS_REQUIRED'].includes(error.code))throw error;
+        return {mode:'staff',setupRequired:await this.bootstrapNeeded(),user:null};
+      }
+    });
     app.post('/v1/auth/login',async(request,reply)=>{this.rateLimit(request);const input=credentials.parse(request.body);return this.login(input.email,input.password,reply);});
     app.post('/v1/auth/setup',async(request,reply)=>{
       this.rateLimit(request);const input=credentials.extend({password:z.string().min(12).max(128),name:z.string().trim().min(2).max(70)}).parse(request.body);
