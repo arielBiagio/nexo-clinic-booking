@@ -24,6 +24,10 @@
 :root[data-theme='dark'] .brand-dot{color:var(--green)}
 :root[data-theme='dark'] .doctor-0{--doctor-bg:#213c2f;--doctor-border:#41664f;--doctor-text:#b9ddc7}
 :root[data-theme='dark'] .doctor-1{--doctor-bg:#403729;--doctor-border:#6c5b41;--doctor-text:#e4cba2}
+:root[data-theme='dark'] .doctor-2{--doctor-bg:#243445;--doctor-border:#435d78;--doctor-text:#bdd5ef}
+:root[data-theme='dark'] .doctor-3{--doctor-bg:#332c43;--doctor-border:#5d4e74;--doctor-text:#d3c3ec}
+:root[data-theme='dark'] .doctor-4{--doctor-bg:#203b3e;--doctor-border:#3e686d;--doctor-text:#b1dce0}
+:root[data-theme='dark'] .doctor-5{--doctor-bg:#402d36;--doctor-border:#70505f;--doctor-text:#e4bdce}
 :root[data-theme='dark'] .patient-avatar.doctor-0{background:#213c2f;color:#b9ddc7;border-color:#2e4236}
 :root[data-theme='dark'] .patient-avatar.doctor-1{background:#403729;color:#e4cba2;border-color:#4a3e2e}
 :root[data-theme='dark'] :is(.sidebar nav button.active,.filter-chip.active,.slot-picker button.selected,.conversation-item.selected,.activity-list li.activity-unread){background:color-mix(in srgb,var(--green) 16%,var(--surface));color:var(--text-primary)}

@@ -1,6 +1,7 @@
 import { Temporal } from '@js-temporal/polyfill';
 
 const errors:Record<string,string> = {
+  PATIENT_NOT_FOUND:'La ficha ya no está disponible. Volvé a buscar al paciente antes de reservar.',
   GOOGLE_NOT_CONFIGURED:'La conexión con Google todavía no está configurada en el servidor.',
   GOOGLE_RECONNECT:'Volvé a conectar tu cuenta de Google para reanudar la sincronización.',
   PATIENT_DETAILS_CHANGED:'La ficha cambió o le falta contacto. Volvé a buscarla y revisá nombre y teléfono en Conversaciones.',

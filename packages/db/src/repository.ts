@@ -32,13 +32,19 @@ export class ClinicRepository {
 
   async searchPatients(search:string,therapistScope?:string){
     if(search.trim().length<2)return [];
-    return (await this.db.query(`select p.id,p.name,p.phone,chosen.id as conversation_id,chosen.telegram from public.patients p
-      join lateral (select c.id,exists(select 1 from private.telegram_peers peer where peer.conversation_id=c.id) as telegram
+    const terms=search.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+    const phone=/^[+\d\s().-]+$/.test(search.trim())?search.replace(/\D/g,''):'';
+    if(!terms.length&&!phone)return [];
+    return (await this.db.query(`select p.id,p.name,p.phone,p.name_collected,chosen.id as conversation_id,
+      (chosen.id is null or chosen.archived_at is not null) as archived,coalesce(chosen.telegram,false) as telegram from public.patients p
+      left join lateral (select c.id,c.archived_at,exists(select 1 from private.telegram_peers peer where peer.conversation_id=c.id) as telegram
         from public.conversations c join public.patient_identities i on i.id=c.identity_id
-        where i.patient_id=p.id and c.archived_at is null order by telegram desc,c.created_at desc limit 1) chosen on true
-      where p.name_collected and p.phone is not null and (p.name ilike '%'||$1||'%' or p.phone like '%'||$2||'%')
+        where i.patient_id=p.id order by (c.archived_at is null) desc,telegram desc,c.created_at desc limit 1) chosen on true
+      where ((p.name_collected and cardinality($1::text[])>0 and not exists(select 1 from unnest($1::text[]) term
+        where position(term in translate(lower(p.name),'áàäâãéèëêíìïîóòöôõúùüûñç','aaaaaeeeeiiiiooooouuuunc'))=0))
+        or ($2::text<>'' and position($2 in regexp_replace(coalesce(p.phone,''),'[^0-9]','','g'))>0))
         and ($3::uuid is null or exists(select 1 from public.appointments a where a.patient_id=p.id and a.therapist_id=$3 and a.status='confirmed'))
-      order by chosen.telegram desc,p.name limit 20`,[search.trim(),search.replace(/[^\d+]/g,'')||'no-phone-query',therapistScope??null])).rows;
+      order by coalesce(chosen.telegram,false) desc,p.name limit 20`,[terms,phone,therapistScope??null])).rows;
   }
 
   /** Explicit operator-approved repair only. Never called by the LLM or phone matching. */
@@ -214,7 +220,8 @@ export class ClinicRepository {
   }
 
   /** One confirmed manual booking, including contact and retry identity, in one transaction. */
-  async createManualAppointment(therapistId:string,input:{slotId:string;name:string;phone:string;conversationId?:string|undefined},requestId:string,actor?:{id:string;role:string}){
+  async createManualAppointment(therapistId:string,input:{slotId:string;name:string;phone:string;conversationId?:string|undefined;patientId?:string|undefined},requestId:string,actor?:{id:string;role:string}){
+    if(input.conversationId&&input.patientId)throw new DomainError('INVALID_INPUT',400);
     const patient=patientDetailsInput.parse({name:input.name,phone:input.phone});
     const {name,phone}=patient;
     if(!name||!phone)throw new DomainError('PATIENT_DETAILS_REQUIRED',400);
@@ -224,25 +231,37 @@ export class ClinicRepository {
       const prior=(await db.query(`select a.*,p.name as saved_name,p.phone as saved_phone from public.appointments a
         join public.patients p on p.id=a.patient_id where a.request_key=$1`,[key])).rows[0];
       if(prior){
-        if(prior.therapist_id!==therapistId||prior.slot_id!==input.slotId||prior.saved_name!==name||prior.saved_phone!==phone||prior.status!=='confirmed'||input.conversationId&&prior.conversation_id!==input.conversationId)throw new DomainError('IDEMPOTENCY_CONFLICT',409);
+        if(prior.therapist_id!==therapistId||prior.slot_id!==input.slotId||prior.saved_name!==name||prior.saved_phone!==phone||prior.status!=='confirmed'||input.conversationId&&prior.conversation_id!==input.conversationId||input.patientId&&prior.patient_id!==input.patientId)throw new DomainError('IDEMPOTENCY_CONFLICT',409);
         const {saved_name:_name,saved_phone:_phone,...booked}=prior;return booked;
       }
       let patientId:string=randomUUID(),conversation=input.conversationId??randomUUID(),previousStatus='active';
-      if(input.conversationId){
-        patientId=await this.getConversationPatientId(conversation,db);
-        if(actor?.role==='therapist'&&!(await db.query("select id from public.appointments where patient_id=$1 and therapist_id=$2 and status='confirmed' limit 1",[patientId,therapistId])).rows.length)throw new DomainError('FORBIDDEN',403);
-        await db.query('select id from public.patients where id=$1 for update',[patientId]);
+      if(input.conversationId||input.patientId){
+        patientId=input.patientId??await this.getConversationPatientId(conversation,db);
+        if(!(await db.query('select id from public.patients where id=$1 for update',[patientId])).rows.length)throw new DomainError('PATIENT_NOT_FOUND',404);
+        if(input.patientId){
+          const active=(await db.query<{id:string}>(`select c.id from public.conversations c join public.patient_identities i on i.id=c.identity_id
+            where i.patient_id=$1 and c.archived_at is null order by exists(select 1 from private.telegram_peers peer where peer.conversation_id=c.id) desc,c.created_at desc limit 1 for update of c`,[patientId])).rows[0];
+          if(active)conversation=active.id;
+          else{
+            // Reuse the patient identity, preserving every archived conversation as history.
+            let identity=(await db.query<{id:string}>(`select i.id from public.patient_identities i where i.patient_id=$1
+              order by exists(select 1 from public.conversations c join private.telegram_peers peer on peer.conversation_id=c.id where c.identity_id=i.id) desc,i.id limit 1`,[patientId])).rows[0]?.id;
+            if(!identity){identity=randomUUID();await db.query("insert into public.patient_identities(id,patient_id,channel,external_user_id) values ($1,$2,'telegram',$3)",[identity,patientId,`manual-${identity}`]);}
+            conversation=randomUUID();await db.query('insert into public.conversations(id,identity_id) values ($1,$2)',[conversation,identity]);
+          }
+        }
         const saved=(await db.query('select status,archived_at from public.conversations where id=$1 for update',[conversation])).rows[0]!;
         if(saved.archived_at)throw new DomainError('CONVERSATION_NOT_FOUND',404);
         const details=await this.getPatientDetails(conversation,db);
-        if(!details.name_collected||details.name!==name||details.phone!==phone)throw new DomainError('PATIENT_DETAILS_CHANGED',409);
+        if(details.name_collected&&details.name!==name||details.phone&&details.phone!==phone)throw new DomainError('PATIENT_DETAILS_CHANGED',409);
+        if(!details.name_collected||!details.phone)await new ClinicRepository(withSavepoints(db)).updatePatientDetails(conversation,{...(!details.name_collected?{name}:{}),...(!details.phone?{phone}:{})});
         previousStatus=String(saved.status);
       }
       const therapist=(await db.query<{staff_user_id:string|null}>('select staff_user_id from public.therapists where id=$1 for update',[therapistId])).rows[0];
       if(!therapist)throw new DomainError('THERAPIST_NOT_FOUND',404);
       if(actor?.role==='therapist'&&therapist.staff_user_id!==actor.id)throw new DomainError('FORBIDDEN',403);
       if(!(await db.query('select id from public.slots where id=$1 and therapist_id=$2 and active and starts_at>now()',[input.slotId,therapistId])).rows.length)throw new DomainError('SLOT_UNAVAILABLE',409);
-      if(!input.conversationId){
+      if(!input.conversationId&&!input.patientId){
         const identity=randomUUID();
         const summary=patientSummary({name,name_collected:true,phone,insurance:null,reported_reason:null,additional_info:null,intake_summary:'',details_updated_at:null});
         await db.query('insert into public.patients(id,name,name_collected,phone,intake_summary,details_updated_at) values ($1,$2,true,$3,$4,now())',[patientId,name,phone,summary]);

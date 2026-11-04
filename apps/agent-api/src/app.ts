@@ -96,7 +96,7 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
   app.get('/v1/therapists/:id/profile',request=>repository.getTherapistProfile(id.parse((request.params as {id:string}).id)));
   app.patch('/v1/therapists/:id/profile',request=>repository.updateTherapistProfile(id.parse((request.params as {id:string}).id),z.strictObject({name:z.string().trim().min(2).max(70),specialty:z.string().trim().min(2).max(120)}).parse(request.body),request.staff));
   app.post('/v1/therapists/:id/appointments',request=>{
-    const input=z.strictObject({slotId:id,confirmed:z.literal(true),name:z.string().trim().min(2).max(70),phone:z.string().min(7).max(40),conversationId:id.optional()}).parse(request.body);
+    const input=z.strictObject({slotId:id,confirmed:z.literal(true),name:z.string().trim().min(2).max(70),phone:z.string().min(7).max(40),conversationId:id.optional(),patientId:id.optional()}).refine(value=>!(value.conversationId&&value.patientId)).parse(request.body);
     const requestId=z.uuid().parse(request.headers['idempotency-key']);
     return repository.createManualAppointment(id.parse((request.params as {id:string}).id),input,requestId,request.staff);
   });
@@ -104,7 +104,7 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
   app.get('/v1/patients/search',request=>{
     if(request.staff?.role==='therapist'&&!request.staff.therapistId)throw new DomainError('FORBIDDEN',403);
     const input=z.strictObject({q:z.string().trim().min(2).max(70)}).parse(request.query);
-    return repository.searchPatients(input.q,request.staff?.role==='therapist'?request.staff.therapistId??undefined:undefined);
+    return repository.searchPatients(input.q);
   });
   app.get('/v1/inbox/unread',request=>repository.getUnreadConversations(request.staff?.id??'local'));
   app.get('/v1/activity',request=>{

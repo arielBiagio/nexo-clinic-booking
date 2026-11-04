@@ -116,6 +116,13 @@
 @media(prefers-reduced-motion:reduce){.quick-actions-menu{animation:none}.quick-actions-trigger,.quick-actions-trigger>svg{transition:none}}
 
 /* Compact appointments keep both lines intact instead of shrinking the patient name. */
+.doctor-2{--doctor-bg:#e7eff8;--doctor-border:#a4bad5;--doctor-text:#486d96;background:var(--doctor-bg)}
+.doctor-3{--doctor-bg:#efeaf7;--doctor-border:#b8abd1;--doctor-text:#77628e;background:var(--doctor-bg)}
+.doctor-4{--doctor-bg:#e3f2f2;--doctor-border:#9ac4c6;--doctor-text:#3d7c80;background:var(--doctor-bg)}
+.doctor-5{--doctor-bg:#f7e9ee;--doctor-border:#d1a7b6;--doctor-text:#986378;background:var(--doctor-bg)}
+.color-dot[class*='doctor-']{background:var(--doctor-border)}
+.day-column{isolation:isolate}.open-slot{z-index:0}
+.calendar-body .appointment{background:var(--doctor-bg,var(--surface,#fff));color:var(--doctor-text,var(--text-primary,#25322f));border-color:var(--doctor-border,var(--border));opacity:1;z-index:1}
 .calendar-body .appointment{padding:4px 6px;gap:2px}
 .calendar-body .appointment .appointment-heading{display:grid;grid-template-columns:max-content minmax(0,1fr);align-items:baseline;gap:6px;min-width:0;flex:0 0 16px;height:16px}
 .calendar-body .appointment .appointment-heading strong{min-width:0;font-size:12.5px;line-height:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
