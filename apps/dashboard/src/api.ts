@@ -47,6 +47,7 @@ export async function api<T>(path:string, body?:unknown, method?:string, headers
 }
 export const dateAt = (instant:string,zone:string) => Temporal.Instant.from(instant).toZonedDateTimeISO(zone).toPlainDate().toString();
 export const addDays = (date:string,days:number) => Temporal.PlainDate.from(date).add({days}).toString();
+export const weekAt = (instant:string,zone:string) => {const date=Temporal.Instant.from(instant).toZonedDateTimeISO(zone).toPlainDate();return date.subtract({days:date.dayOfWeek-1}).toString();};
 export const dayInstant = (date:string,zone:string) => Temporal.PlainDate.from(date).toZonedDateTime(zone).toInstant().toString();
 export const minutesAt = (instant:string,zone:string) => { const value=Temporal.Instant.from(instant).toZonedDateTimeISO(zone);return value.hour*60+value.minute; };
 export const fmtTime = (instant:string,zone:string) => new Intl.DateTimeFormat('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:zone,hourCycle:'h23'}).format(new Date(instant));

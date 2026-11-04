@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowRight, ArrowUpRight, CalendarClock,CalendarCheck2, CalendarDays, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, FlaskConical, Headphones, HeartPulse, Menu, MessageSquare, Moon, Plus, RefreshCw, Search, Settings, Sparkles, Sun, Users, X } from 'lucide-react';
-import { api, dateAt, fmtDate, fmtTime, initials } from './api';
-import type { Appointment, Chat, Dashboard, StaffUser } from './types';
+import { api, dateAt, fmtDate, fmtTime, initials,weekAt } from './api';
+import type { Appointment, CalendarFocus,Chat, Dashboard, StaffUser } from './types';
 import { Calendar } from './Calendar';
 import { Dialog } from './Dialog';
 import { Booking } from './Booking';
@@ -28,6 +28,9 @@ export function App({user,accessMode,onLogout,onUserChanged}:{user:StaffUser;acc
   const roleName={admin:'Administrador',reception:'Recepción',therapist:'Terapeuta'}[user.role];
   const pageFromHash=():Page=>{const value=window.location.hash.slice(1);return value==='schedule'?'schedule':!isTherapist&&value==='inbox'?'inbox':isTherapist&&value==='profile'?'profile':value==='team'?'team':'agenda';};
   const [data,setData]=useState<Dashboard|null>(null),[page,setPage]=useState<Page>(pageFromHash),[loading,setLoading]=useState(true),[error,setError]=useState('');
+  const [calendarFocus,setCalendarFocus]=useState<CalendarFocus|null>(null);
+  const focusRequest=useRef(0),loadRequest=useRef(0),requestedWeek=useRef<string|undefined>(undefined);
+  const pendingActivity=useRef<Omit<CalendarFocus,'requestId'|'showWeek'>|null>(null);
   const [calendarResult]=useState(()=>new URL(window.location.href).searchParams.get('googleCalendar'));
   const [settingsOpen,setSettingsOpen]=useState(()=>Boolean(new URL(window.location.href).searchParams.get('googleCalendar')));
   useEffect(()=>{const url=new URL(window.location.href);if(url.searchParams.has('googleCalendar')){url.searchParams.delete('googleCalendar');window.history.replaceState(null,'',url.pathname+url.search+url.hash);}},[]);
@@ -41,16 +44,17 @@ export function App({user,accessMode,onLogout,onUserChanged}:{user:StaffUser;acc
   const [removedKind,setRemovedKind]=useState<RemovedKind|null>(null),[undo,setUndo]=useState<{kind:RemovedKind;id:string}|null>(null),[restoring,setRestoring]=useState(false);
   const alerts=useInboxAlerts(!isTherapist,{agenda:'Agenda',inbox:'Conversaciones',schedule:'Disponibilidad',team:'Equipo',profile:'Mi perfil'}[page],setToast,notifications.onAttention);
   const load=useCallback(async(week?:string)=>{
+    const request=++loadRequest.current;requestedWeek.current=week;
     setLoading(true);setError('');
-    try{setData(await api<Dashboard>(`/dashboard${week?`?fromDate=${week}`:''}`));}
-    catch(e){setError((e as Error).message);}finally{setLoading(false);}
+    try{const next=await api<Dashboard>(`/dashboard${week?`?fromDate=${week}`:''}`);if(request===loadRequest.current){requestedWeek.current=next.weekStart;setData(next);}}
+    catch(e){if(request===loadRequest.current)setError((e as Error).message);}finally{if(request===loadRequest.current)setLoading(false);}
   },[]);
   useEffect(()=>{void load();},[load]);
   useEffect(()=>{const update=()=>setPage(pageFromHash());window.addEventListener('hashchange',update);return()=>window.removeEventListener('hashchange',update);},[]);
   useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(''),5000);return()=>clearTimeout(timer);},[toast]);
   const week=data?.weekStart;
-  useEffect(()=>{const timer=setInterval(()=>{if(!document.hidden)void load(week);},15_000);return()=>clearInterval(timer);},[load,week]);
-  const refresh=()=>{void load(data?.weekStart);};
+  useEffect(()=>{const timer=setInterval(()=>{if(!document.hidden)void load(requestedWeek.current??week);},15_000);return()=>clearInterval(timer);},[load,week]);
+  const refresh=()=>{void load(requestedWeek.current??data?.weekStart);};
   const remove=async(kind:RemovedKind,id:string)=>{
     await api(kind==='appointments'?`/appointments/${id}`:`/demo/conversations/${id}`,undefined,'DELETE');
     setUndo({kind,id});
@@ -70,7 +74,16 @@ export function App({user,accessMode,onLogout,onUserChanged}:{user:StaffUser;acc
     setToast(kind==='appointments'?'Turno restaurado.':'Conversación restaurada.');await load(data?.weekStart);
   };
   const undoLast=async()=>{if(!undo||restoring)return;setRestoring(true);try{await restore(undo.kind,undo.id);}catch(e){setToast((e as Error).message);}finally{setRestoring(false);}};
-  const navigate=(target:Page)=>{setPage(target);window.location.hash=target;setMobileMenu(false);setSearch('');};
+  const navigate=(target:Page)=>{pendingActivity.current=null;setCalendarFocus(null);setPage(target);window.location.hash=target;setMobileMenu(false);setSearch('');};
+  const openActivity=(target:Omit<CalendarFocus,'requestId'|'showWeek'>)=>{
+    if(!data){navigate('agenda');pendingActivity.current=target;return;}
+    const targetWeek=weekAt(target.startsAt,data.clinic.time_zone);
+    navigate('agenda');setFilter(current=>current==='all'||current===target.therapistId?current:'all');
+    setCalendarFocus({...target,requestId:++focusRequest.current,showWeek:data?.weekStart!==targetWeek});
+    if(data?.weekStart!==targetWeek)void load(targetWeek);
+    else if(requestedWeek.current!==targetWeek){++loadRequest.current;requestedWeek.current=targetWeek;setLoading(false);setError('');}
+  };
+  useEffect(()=>{if(data&&pendingActivity.current){const target=pendingActivity.current;pendingActivity.current=null;openActivity(target);}},[data]);
   const startSimulator=async()=>{if(isTherapist)return;setMobileMenu(false);setSimulator(true);try{
     const remembered=chat?.id??sessionStorage.getItem('nexo-demo-chat');
     let next:Chat;
@@ -94,15 +107,15 @@ export function App({user,accessMode,onLogout,onUserChanged}:{user:StaffUser;acc
       <nav aria-label="Navegación principal"><button className={page==='agenda'?'active':''} onClick={()=>navigate('agenda')}><CalendarDays size={19}/>Agenda</button>{!isTherapist&&<><button className={page==='inbox'?'active':''} onClick={()=>{setSelectedConversation(null);navigate('inbox');}}><MessageSquare size={19}/>Conversaciones{alerts.total>0&&<span className="nav-badge" aria-label={`${alerts.total} conversaciones por atender`}>{alerts.total}</span>}</button></>}<button className={page==='schedule'?'active':''} onClick={()=>navigate('schedule')}><Clock3 size={19}/>Disponibilidad</button>{isTherapist&&<button className={page==='profile'?'active':''} onClick={()=>navigate('profile')}><Users size={19}/>Mi perfil</button>}<button className={page==='team'?'active':''} onClick={()=>navigate('team')}><Users size={19}/>Equipo</button></nav>{!isTherapist&&<button className="sidebar-simulator" onClick={()=>void startSimulator()}><Sparkles size={18}/>Probar asistente</button>}</div>
       <div className="sidebar-bottom"><div className="sidebar-user"><span className="user-avatar">{initials(user.name)}</span><div><strong>{user.name}</strong><span>{roleName}{accessMode==='demo'?' · Demo':''}</span></div><button className="icon-button settings-button" aria-label="Abrir ajustes" title="Ajustes" onClick={()=>{setMobileMenu(false);setSettingsOpen(true);}}><Settings size={19}/></button></div></div>
     </aside>
-    <div className="main-shell"><header className="topbar"><nav className="breadcrumbs" aria-label="Ubicación"><button className="icon-button mobile-nav" aria-label="Abrir menú" onClick={()=>setMobileMenu(true)}><Menu size={21}/></button><span>Clínica Demo</span><ChevronRight size={13}/><strong aria-current="page">{pageTitles[page]}</strong></nav><div className="topbar-actions"><span className="demo-pill"><i/>{accessMode==='staff'?'Equipo · acceso privado':'Demo · datos ficticios'}</span>{!isTherapist&&<button className="icon-button" aria-label="Ayuda de la demo" onClick={()=>setHelp(true)}><CircleHelp size={18}/></button>}<span className="topbar-divider"/><button className="icon-button theme-toggle" aria-label={theme==='dark'?'Activar modo claro':'Activar modo oscuro'} title={theme==='dark'?'Modo claro':'Modo oscuro'} aria-pressed={theme==='dark'} onClick={toggleTheme}>{theme==='dark'?<Sun size={19}/>:<Moon size={19}/>}</button><ActivityBell zone={zone} onNewActivity={notifications.onActivity}/><span className="user-avatar small">{initials(user.name)}</span></div></header>
+    <div className="main-shell"><header className="topbar"><nav className="breadcrumbs" aria-label="Ubicación"><button className="icon-button mobile-nav" aria-label="Abrir menú" onClick={()=>setMobileMenu(true)}><Menu size={21}/></button><span>Clínica Demo</span><ChevronRight size={13}/><strong aria-current="page">{pageTitles[page]}</strong></nav><div className="topbar-actions"><span className="demo-pill"><i/>{accessMode==='staff'?'Equipo · acceso privado':'Demo · datos ficticios'}</span>{!isTherapist&&<button className="icon-button" aria-label="Ayuda de la demo" onClick={()=>setHelp(true)}><CircleHelp size={18}/></button>}<span className="topbar-divider"/><button className="icon-button theme-toggle" aria-label={theme==='dark'?'Activar modo claro':'Activar modo oscuro'} title={theme==='dark'?'Modo claro':'Modo oscuro'} aria-pressed={theme==='dark'} onClick={toggleTheme}>{theme==='dark'?<Sun size={19}/>:<Moon size={19}/>}</button><ActivityBell zone={zone} onNewActivity={notifications.onActivity} onSelect={openActivity}/><span className="user-avatar small">{initials(user.name)}</span></div></header>
       <main data-page={page} className={page==='inbox'?'inbox-main':undefined}>
         <h1 className="sr-only">{pageTitles[page]}</h1>
         {error&&<div className="load-error" role="alert"><span>{error}</span><button className="secondary-button" onClick={refresh}>Reintentar</button></div>}
         {!data&&!error&&<LoadingPlaceholder variant={page==='agenda'?'dashboard':page==='inbox'?'inbox':page==='schedule'?'schedule':'form'} label="Cargando sección"/>}
         {data&&<>
           {page==='agenda'&&<><div className="stats-grid"><div className="stat-card"><span className="stat-icon mint"><CalendarCheck2 size={19}/></span><span className="stat-label">Turnos esta semana</span><div><strong>{data.appointments.length}</strong><span className="stat-tag"><Check size={12}/>Confirmados</span></div></div><div className="stat-card"><span className="stat-icon lavender"><Clock3 size={19}/></span><span className="stat-label">Horarios disponibles</span><div><strong>{data.slots.length}</strong><span className="stat-description">para reservar</span></div></div><button disabled={isTherapist} className="stat-card stat-button" onClick={()=>openInbox()}><span className="stat-icon peach"><Headphones size={19}/></span><span className="stat-label">Necesitan una mano</span><div><strong>{pending.length}</strong><span className={`stat-tag ${pending.length?'warm':''}`}>{pending.length?'En recepción':'Todo al día'}<ArrowUpRight size={12}/></span></div></button><button className="stat-card stat-button" onClick={()=>navigate('team')} aria-label={canManageStaff?'Ver equipo y profesionales':'Ver profesionales'}><span className="stat-icon blue"><Users size={19}/></span><span className="stat-label">Profesionales</span><div><strong>{professionals.length}</strong><span className="avatar-stack">{professionals.map((t,i)=><i key={t.id} className={`doctor-${i}`}>{initials(t.name)}</i>)}</span></div></button></div>
-          <div className="agenda-section-heading"><div><h2>Agenda semanal<span className="small-tag">{fmtDate(data.weekStart,{month:'long',year:'numeric'})}</span></h2></div><div className="agenda-search"><Search size={15}/><input type="search" maxLength={120} autoComplete="off" aria-label="Buscar paciente o profesional" placeholder="Buscar paciente o profesional…" value={search} onChange={e=>setSearch(e.target.value)}/>{search&&<button className="icon-button" aria-label="Limpiar búsqueda" onClick={()=>setSearch('')}><X size={15}/></button>}<button className={`icon-button ${loading?'spinning':''}`} aria-label="Actualizar agenda" onClick={refresh}><RefreshCw size={15}/></button></div></div>
-          <div className="agenda-layout"><Calendar data={data} onWeek={date=>void load(date)} onBook={(date,therapistId,slotId)=>setBooking({date,therapistId,slotId})} onAppointment={setAppointment} filter={filter} onFilter={setFilter} search={search}/>
+          <div className="agenda-section-heading"><div><h2>Agenda semanal<span className="small-tag">{fmtDate(data.weekStart,{month:'long',year:'numeric'})}</span></h2></div><div className="agenda-search"><Search size={15}/><input type="search" maxLength={120} autoComplete="off" aria-label="Buscar paciente o profesional" placeholder="Buscar paciente o profesional…" value={search} onChange={e=>{setCalendarFocus(null);setSearch(e.target.value);}}/>{search&&<button className="icon-button" aria-label="Limpiar búsqueda" onClick={()=>setSearch('')}><X size={15}/></button>}<button className={`icon-button ${loading?'spinning':''}`} aria-label="Actualizar agenda" onClick={refresh}><RefreshCw size={15}/></button></div></div>
+          <div className="agenda-layout"><Calendar data={data} focus={calendarFocus} onWeek={date=>{setCalendarFocus(null);void load(date);}} onBook={(date,therapistId,slotId)=>setBooking({date,therapistId,slotId})} onAppointment={setAppointment} filter={filter} onFilter={id=>{setCalendarFocus(null);setFilter(id);}} search={search}/>
             <aside className="agenda-rail"><section className="panel upcoming-panel"><div className="rail-heading"><h2>Próximos encuentros</h2><span className="live-dot"/></div>{next.length?next.map(a=><button className="upcoming-item" key={a.id} onClick={()=>setAppointment(a)}><span className={`patient-avatar doctor-${data.therapists.findIndex(t=>t.id===a.therapist_id)}`}>{initials(a.patient_name)}</span><div><strong>{a.patient_name}</strong><span>{a.therapist_name}</span><small>{fmtDate(dateAt(a.starts_at,zone),{weekday:'short',day:'numeric',month:'short'})} · {fmtTime(a.starts_at,zone)}</small></div><ChevronRight size={14}/></button>):<div className="empty-upcoming"><CalendarDays size={25}/><p>No hay turnos con estos filtros.</p></div>}{<button className="rail-link" onClick={()=>setBooking({})}>Agregar un turno<Plus size={14}/></button>}</section>
             {!isTherapist&&<section className="handoff-card"><div className="handoff-card-top"><span><Headphones size={20}/></span><span className="small-tag">RECEPCIÓN</span></div><h3>{pending.length?'Por atender':'Sin pendientes'}</h3>{pending.length>0&&<p>{pending.length} {pending.length===1?'conversación pendiente':'conversaciones pendientes'}.</p>}{pending.length>0&&<div className="pending-patient"><span className="patient-avatar">{initials(pending[0]!.patient_name)}</span><div><strong>{pending[0]!.patient_name}</strong><span>Solicitó hablar con recepción</span></div></div>}<button onClick={()=>openInbox(pending[0]?.id)}>Ir a la bandeja<ArrowRight size={16}/></button></section>}
 

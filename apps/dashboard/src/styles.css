@@ -50,7 +50,15 @@
 .activity-tools{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 16px 12px;color:var(--text-secondary,#75867b);flex-shrink:0}
 .activity-tools button,.activity-footer button,.activity-error button{color:var(--green);text-decoration:underline;font-size:12.5px;background:none;border:0;padding:2px;cursor:pointer}
 .activity-list{overflow-y:auto;overscroll-behavior:contain;min-height:0;list-style:none;margin:0;padding:0}
-.activity-list li{position:relative;display:flex;flex-direction:column;gap:4px;padding:13px 16px 13px 23px;border-top:1px solid var(--border,#edf1ed);line-height:1.5;overflow-wrap:anywhere}
+.activity-list li{position:relative;border-top:1px solid var(--border,#edf1ed);line-height:1.5;overflow-wrap:anywhere}
+.activity-item{display:flex;flex-direction:column;align-items:flex-start;gap:4px;width:100%;padding:13px 16px 13px 23px;text-align:left;line-height:inherit;color:inherit}
+.activity-item:hover{background:var(--surface-soft)}.activity-item:focus-visible{outline-offset:-3px}.activity-list li::before{pointer-events:none}
+.calendar-focus-target{scroll-margin-block:110px;outline:2px solid var(--green);outline-offset:2px;animation:calendarTargetPulse 1.4s ease-out}
+.calendar-location-marker{position:absolute;left:4px;right:4px;z-index:4;display:flex;align-items:center;gap:4px;height:3px;border-radius:2px;background:var(--green);color:var(--text-primary);font-size:12px;pointer-events:none}
+.calendar-location-marker>strong,.calendar-location-marker>span{position:relative;top:-20px;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:3px 5px;line-height:1.3}
+.calendar-location-marker span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@keyframes calendarTargetPulse{0%,50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--green) 22%,transparent)}100%{box-shadow:0 0 0 0 transparent}}
+@media(prefers-reduced-motion:reduce){.calendar-focus-target{animation:none}}
 .activity-list li.activity-unread{background:var(--surface-soft,#f0f7f3)}
 .activity-list strong{font-size:13.5px;font-weight:650}.activity-list small,.activity-list time{font-size:12.5px;color:var(--text-secondary,#75867b)}.activity-list time{margin-top:3px}
 .activity-footer,.activity-empty,.activity-error{padding:14px 16px;margin:0;font-size:12.5px;line-height:1.5}.activity-footer{flex-shrink:0;border-top:1px solid var(--border)}.activity-error{color:var(--text-danger,#9c4339)}

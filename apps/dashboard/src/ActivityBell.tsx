@@ -2,12 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Bell, X } from 'lucide-react';
 import { api } from './api';
 import { LoadingPlaceholder } from './LoadingPlaceholder';
+import type { CalendarFocus } from './types';
 
-type Movement={id:string;kind:'booked'|'rescheduled'|'cancelled'|'restored';occurred_at:string;starts_at:string|null;previous_starts_at:string|null;patient_name:string;therapist_name:string|null;previous_therapist_name:string|null;unread:boolean};
+type Movement={id:string;appointment_id:string;kind:CalendarFocus['kind'];occurred_at:string;starts_at:string|null;previous_starts_at:string|null;therapist_id:string|null;navigation_starts_at?:string;navigation_therapist_id?:string|null;patient_name:string;therapist_name:string|null;previous_therapist_name:string|null;unread:boolean};
 type Feed={items:Movement[];unreadCount:number};
 const labels={booked:'Nuevo turno',rescheduled:'Turno reprogramado',cancelled:'Turno cancelado',restored:'Turno restaurado'};
 
-export function ActivityBell({zone,onNewActivity}:{zone:string;onNewActivity:()=>void}){
+export function ActivityBell({zone,onNewActivity,onSelect}:{zone:string;onNewActivity:()=>void;onSelect:(target:Omit<CalendarFocus,'requestId'|'showWeek'>)=>void}){
   const [open,setOpen]=useState(false),[feed,setFeed]=useState<Feed>({items:[],unreadCount:0}),[error,setError]=useState(''),[busy,setBusy]=useState(false);
   const [visibleCount,setVisibleCount]=useState(6);
   const [loading,setLoading]=useState(true);
@@ -50,7 +51,10 @@ export function ActivityBell({zone,onNewActivity}:{zone:string;onNewActivity:()=
       <div className="activity-heading"><h2>Actividad</h2><button className="icon-button" aria-label="Cerrar actividad" onClick={()=>{setOpen(false);trigger.current?.focus();}}><X size={18}/></button></div>
       <div className="activity-tools"><span>Últimos movimientos</span>{feed.unreadCount>0&&<button disabled={busy} onClick={()=>void markRead(null)}>Marcar todo leído</button>}</div>
       {error&&<div className="activity-error" role="status">{error} <button onClick={()=>void refresh()}>Reintentar</button></div>}
-      <ul className="activity-list">{feed.items.slice(0,visibleCount).map(item=><li key={item.id} className={`activity-${item.kind}${item.unread?' activity-unread':''}`}><strong>{labels[item.kind]}</strong><span>{item.patient_name}</span>{item.starts_at&&<span>{when(item.starts_at)}{item.therapist_name?` · ${item.therapist_name}`:''}</span>}{item.previous_starts_at&&<small>Antes: {when(item.previous_starts_at)}{item.previous_therapist_name?` · ${item.previous_therapist_name}`:''}</small>}<time dateTime={item.occurred_at}>{when(item.occurred_at)}</time></li>)}</ul>
+      <ul className="activity-list">{feed.items.slice(0,visibleCount).map(item=>{
+        const startsAt=item.starts_at??item.navigation_starts_at??item.previous_starts_at;
+        return <li key={item.id} className={`activity-${item.kind}${item.unread?' activity-unread':''}`}><button type="button" className="activity-item" disabled={!startsAt} aria-label={`Ver en la agenda: ${labels[item.kind]} · ${item.patient_name}${startsAt?` · ${when(startsAt)}`:''}`} onClick={()=>{if(!startsAt)return;setOpen(false);onSelect({appointmentId:item.appointment_id,startsAt,therapistId:item.therapist_id??item.navigation_therapist_id??null,kind:item.kind});}}><strong>{labels[item.kind]}</strong><span>{item.patient_name}</span>{item.starts_at&&<span>{when(item.starts_at)}{item.therapist_name?` · ${item.therapist_name}`:''}</span>}{item.previous_starts_at&&<small>Antes: {when(item.previous_starts_at)}{item.previous_therapist_name?` · ${item.previous_therapist_name}`:''}</small>}<time dateTime={item.occurred_at}>{when(item.occurred_at)}</time></button></li>;
+      })}</ul>
       {feed.items.length>6&&<div className="activity-expand">{visibleCount<feed.items.length&&<button onClick={()=>setVisibleCount(count=>count+6)}>Ver más</button>}{visibleCount>6&&<button onClick={()=>{setVisibleCount(6);root.current?.querySelector('.activity-list')?.scrollTo({top:0});}}>Ver menos</button>}</div>}
       {loading&&<LoadingPlaceholder variant="list" label="Cargando actividad"/>}
       {!loading&&!feed.items.length&&!error&&<p className="activity-empty">Todavía no hay movimientos.</p>}

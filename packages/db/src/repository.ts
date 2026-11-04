@@ -138,7 +138,8 @@ export class ClinicRepository {
 
   async getAppointmentActivity(readerId:string,therapistScope?:string){
     const scope=`($2::uuid is null or e.therapist_id=$2 or e.previous_therapist_id=$2 or e.starts_at is null and a.therapist_id=$2)`;
-    const items=(await this.db.query(`select e.id::text,e.appointment_id,e.kind,e.occurred_at,e.starts_at,e.previous_starts_at,
+    const items=(await this.db.query(`select e.id::text,e.appointment_id,e.kind,e.occurred_at,e.starts_at,e.previous_starts_at,e.therapist_id,
+      coalesce(e.starts_at,a.starts_at) as navigation_starts_at,coalesce(e.therapist_id,a.therapist_id) as navigation_therapist_id,
       p.name as patient_name,t.name as therapist_name,previous.name as previous_therapist_name,r.activity_id is null as unread
       from private.appointment_activity e join public.appointments a on a.id=e.appointment_id join public.patients p on p.id=e.patient_id
       left join public.therapists t on t.id=e.therapist_id left join public.therapists previous on previous.id=e.previous_therapist_id
