@@ -12,10 +12,17 @@ export interface Sql {
 
 export function connectPostgres(connectionString: string): Sql {
   const pool = new pg.Pool({ connectionString, max: 5, connectionTimeoutMillis: 5_000, statement_timeout: 10_000 });
+  // Idle sockets may be reset by the network; pg removes them and reconnects on demand.
+  // Never log the provider error: it can contain connection details or SQL.
+  pool.on('error', () => console.warn('Base de datos: se perdió una conexión inactiva; se abrirá otra cuando sea necesaria.'));
   return {
     query: (text, values) => pool.query(text, values),
     async transaction(callback) {
       const client = await pool.connect();
+      let broken=false;
+      const onConnectionError=()=>{broken=true;};
+      // A checked-out client can fail between queries while awaiting another operation.
+      client.on('error',onConnectionError);
       const transaction: Sql = {
         query: (text, values) => client.query(text, values),
         transaction: () => { throw new Error('Nested transaction not supported'); },
@@ -27,9 +34,9 @@ export function connectPostgres(connectionString: string): Sql {
         await client.query('commit');
         return result;
       } catch (error) {
-        await client.query('rollback');
+        try{await client.query('rollback');}catch{broken=true;}
         throw error;
-      } finally { client.release(); }
+      } finally {client.removeListener('error',onConnectionError);client.release(broken);}
     },
     close: () => pool.end(),
   };
