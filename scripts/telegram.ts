@@ -20,7 +20,7 @@ try{
   // Separate processes must never open the same embedded PGlite data directory.
   const db=connectPostgres(required('DATABASE_URL'));close=()=>db.close();
   const key=process.env.OPENROUTER_API_KEY?.trim();
-  const model=key&&process.env.OPENROUTER_ENABLED!=='false'?new OpenRouterModel(key,{model:process.env.OPENROUTER_MODEL?.trim()||'openai/gpt-4o-mini'}):undefined;
+  const model=key&&process.env.OPENROUTER_ENABLED!=='false'?new OpenRouterModel(key,{model:process.env.OPENROUTER_MODEL?.trim()||'openai/gpt-6-luna'}):undefined;
   const service=new TelegramService(db,api,bot.id,code,model,testUserId);
   const controller=new AbortController();for(const signal of ['SIGINT','SIGTERM'] as const)process.once(signal,()=>controller.abort());
   await service.acquire();

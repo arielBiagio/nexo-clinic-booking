@@ -33,7 +33,7 @@
 - React, Vite y Lucide.
 - Fastify y Zod.
 - Supabase Auth, PostgreSQL, PGlite y migraciones SQL.
-- OpenRouter con GPT-4o mini.
+- OpenRouter con GPT-6 Luna.
 - Telegram Bot API mediante long polling y cola persistente de envíos.
 - Google Calendar API y OAuth 2.0, con sincronización persistente en segundo plano.
 - Temporal para fechas, horarios y zonas horarias.

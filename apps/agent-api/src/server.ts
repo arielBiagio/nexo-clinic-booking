@@ -28,7 +28,7 @@ if (local&&fresh) await seedLocal(local.engine);
 const repository = new ClinicRepository(db);
 const openRouterKey=process.env.OPENROUTER_API_KEY?.trim();
 const intentModel=openRouterKey&&process.env.OPENROUTER_ENABLED!=='false'
-  ?new OpenRouterModel(openRouterKey,{model:process.env.OPENROUTER_MODEL?.trim()||'openai/gpt-4o-mini'}):undefined;
+  ?new OpenRouterModel(openRouterKey,{model:process.env.OPENROUTER_MODEL?.trim()||'openai/gpt-6-luna'}):undefined;
 const demo = new DemoService(repository,intentModel);
 if (local||staffMode) {
   const clinic=(await db.query<{time_zone:string}>('select time_zone from public.clinics')).rows[0];

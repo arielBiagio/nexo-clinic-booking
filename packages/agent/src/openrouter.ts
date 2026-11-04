@@ -87,7 +87,7 @@ export class OpenRouterModel implements IntentModel {
   private requests=0;
   constructor(private readonly apiKey:string,options:{model?:string;fetch?:typeof fetch;timeoutMs?:number;maxRequestsPerHour?:number}={}) {
     if(!apiKey.trim())throw new Error('OpenRouter API key required');
-    this.model=options.model??'openai/gpt-4o-mini';
+    this.model=options.model??'openai/gpt-6-luna';
     this.transport=options.fetch??fetch;
     this.timeoutMs=options.timeoutMs??10_000;
     this.maxRequests=options.maxRequestsPerHour??60;
@@ -95,6 +95,11 @@ export class OpenRouterModel implements IntentModel {
   private readonly transport:typeof fetch;
   private readonly timeoutMs:number;
   private readonly maxRequests:number;
+  private generationOptions(temperature:number){
+    // Preserve the short, non-reasoning workflow and its existing output budgets.
+    // Luna's OpenRouter endpoints don't advertise temperature with strict routing.
+    return this.model==='openai/gpt-6-luna'?{reasoning_effort:'none'}:{temperature};
+  }
 
   private reserveRequest() {
     if(Date.now()-this.windowStart>=3_600_000){this.windowStart=Date.now();this.requests=0;}
@@ -109,7 +114,7 @@ export class OpenRouterModel implements IntentModel {
     try {
       response=await this.transport('https://openrouter.ai/api/v1/chat/completions',{
         method:'POST',headers:{Authorization:`Bearer ${this.apiKey}`,'Content-Type':'application/json','X-Title':'Nexo Clinic Demo'},
-        body:JSON.stringify({model:this.model,temperature:0.3,max_tokens:220,stream:false,
+        body:JSON.stringify({model:this.model,...this.generationOptions(0.3),max_tokens:220,stream:false,
           messages:[{role:'system',content:system},{role:'user',content:context.request}]}),
         signal:AbortSignal.timeout(Math.min(this.timeoutMs,4_000)),
       });
@@ -154,11 +159,10 @@ Contexto actual (JSON del backend): ${JSON.stringify({now:context.now,timeZone:c
     try {
       response=await this.transport('https://openrouter.ai/api/v1/chat/completions',{
         method:'POST',headers:{Authorization:`Bearer ${this.apiKey}`,'Content-Type':'application/json','X-Title':'Nexo Clinic Demo'},
-        // Do not send parallel_tool_calls: GPT-4o mini's OpenRouter endpoints do not
-        // advertise it, so require_parameters=true would exclude every provider.
+        // Omit parallel_tool_calls rather than require an unsupported routing parameter.
         // The adapter still returns at most one decision; intake takes priority
         // over accompanying suggestions. No parallel mutation is executed.
-        body:JSON.stringify({model:this.model,temperature:0.1,max_tokens:450,stream:false,
+        body:JSON.stringify({model:this.model,...this.generationOptions(0.1),max_tokens:450,stream:false,
           messages:[{role:'system',content:system},...context.history.slice(-24).map(m=>({role:m.role==='patient'?'user':'assistant',content:m.role==='staff'?`Recepción: ${m.text}`:m.text}))],
           tools:definitions.filter(d=>moving?d.name==='get_reschedule_availability':cancelling?d.name==='prepare_cancellation':weekly?d.name==='prepare_weekly_booking':!searching||d.name==='get_availability').map(definition=>({type:'function',function:{...definition,strict:true}})),
           tool_choice:moving?{type:'function',function:{name:'get_reschedule_availability'}}:cancelling?{type:'function',function:{name:'prepare_cancellation'}}:weekly?{type:'function',function:{name:'prepare_weekly_booking'}}:searching?{type:'function',function:{name:'get_availability'}}:'auto',provider:{require_parameters:true}}),
