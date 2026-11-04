@@ -156,6 +156,12 @@
 .main-shell>main>.loading-placeholder--form,.main-shell>main>.loading-placeholder--schedule{padding:24px;background:var(--surface,#fff);border:1px solid var(--border);border-radius:10px}
 .activity-popover>.loading-placeholder{padding:0 16px 12px}
 @keyframes placeholderPulse{0%,100%{opacity:1}50%{opacity:.62}}
+.patient-card dd{white-space:pre-wrap;overflow-wrap:anywhere}
+.cancel-week{border-top:1px solid var(--border);margin-top:20px;padding-top:20px;display:grid;gap:12px;text-align:left}
+.cancel-week p{margin:0;line-height:1.5;color:var(--muted)}
+.cancel-week ul{margin:0;padding:0;list-style:none;display:grid;gap:8px;max-height:240px;overflow-y:auto}
+.cancel-week li{display:grid;gap:3px;padding:10px 12px;border-radius:8px;background:var(--surface-soft)}
+.cancel-week li span:last-child{color:var(--muted);font-size:13px}
 @media(max-width:1050px){.placeholder-agenda-layout{grid-template-columns:minmax(0,1fr)}.placeholder-agenda-layout>.placeholder-panel:last-child{display:none}}
 @media(max-width:760px){.placeholder-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.placeholder-panel{padding:16px}.placeholder-inbox{grid-template-columns:minmax(0,1fr)}.placeholder-inbox-list{border-right:0}.placeholder-inbox>.placeholder-chat{display:none}.placeholder-calendar-grid>div{padding:6px}.inbox-detail>.loading-placeholder{padding:14px}}
 @media(prefers-reduced-motion:reduce){.placeholder-visual{animation:none}}

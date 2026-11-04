@@ -6,6 +6,7 @@ import { ClinicRepository, DomainError } from '../../../packages/db/src/reposito
 import type { DemoService } from './demo-service.js';
 import { patientDetailsInput } from '../../../packages/core/src/patient.js';
 import type { StaffAuth } from './staff-auth.js';
+import { getCancellationWeek,cancelAppointmentWeek } from '../../../packages/db/src/weekly-cancellation.js';
 
 const id = z.uuid();
 const selection = z.strictObject({ slotId: id });
@@ -44,8 +45,8 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
         let allowed=method==='GET'&&(['/v1/auth/me','/v1/dashboard','/v1/therapists','/v1/demo/removed/appointments','/v1/patients/search'].includes(route)||route==='/v1/availability'&&new URL(request.url,'http://local').searchParams.get('therapistId')===own);
         if(route===`/v1/therapists/${own}/profile`&&['GET','PATCH'].includes(method)||route===`/v1/therapists/${own}/schedule`&&['GET','PUT'].includes(method)||route===`/v1/therapists/${own}/time-off`&&method==='POST'||route.startsWith(`/v1/therapists/${own}/time-off/`)&&method==='DELETE'||route===`/v1/therapists/${own}/appointments`&&method==='POST')allowed=true;
         if(own&&(route==='/v1/activity'&&method==='GET'||route==='/v1/activity/read'&&method==='POST'))allowed=true;
-        const appointment=route.match(/^\/v1\/appointments\/([^/]+)(\/restore|\/reschedule)?$/);
-        if(appointment&&(method==='DELETE'&&!appointment[2]||method==='POST'&&appointment[2])){
+        const appointment=route.match(/^\/v1\/appointments\/([^/]+)(\/restore|\/reschedule|\/cancellation-week)?$/);
+        if(appointment&&(method==='DELETE'&&!appointment[2]||method==='POST'&&appointment[2]||method==='GET'&&appointment[2]==='/cancellation-week')){
           const row=(await repository.db.query('select therapist_id from public.appointments where id=$1',[id.parse(appointment[1])])).rows[0];
           if(!row)throw new DomainError('APPOINTMENT_NOT_FOUND',404);
           allowed=row.therapist_id===own;
@@ -148,6 +149,11 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
     const demo = options.demo;
     app.delete('/v1/appointments/:id',request=>repository.setAppointmentRemoved(id.parse((request.params as {id:string}).id),true,request.staff?.role==='therapist'?request.staff.therapistId??undefined:undefined));
     app.post('/v1/appointments/:id/restore',request=>repository.setAppointmentRemoved(id.parse((request.params as {id:string}).id),false,request.staff?.role==='therapist'?request.staff.therapistId??undefined:undefined));
+    app.get('/v1/appointments/:id/cancellation-week',request=>getCancellationWeek(repository,id.parse((request.params as {id:string}).id),request.staff?.role==='therapist'?{therapistScope:request.staff.therapistId!}:{}));
+    app.post('/v1/appointments/:id/cancellation-week',request=>{
+      const input=z.strictObject({confirmed:z.literal(true),appointments:z.array(z.strictObject({id,version:z.number().int().min(1)})).min(1).max(100)}).parse(request.body);
+      return cancelAppointmentWeek(repository,id.parse((request.params as {id:string}).id),input.appointments,request.staff?.role==='therapist'?{therapistScope:request.staff.therapistId!}:{});
+    });
     app.delete('/v1/demo/conversations/:id',request=>demo.archive(id.parse((request.params as {id:string}).id),true));
     app.post('/v1/demo/conversations/:id/restore',request=>demo.archive(id.parse((request.params as {id:string}).id),false));
     app.get('/v1/demo/removed/:kind',request=>repository.getRemoved(z.enum(['appointments','conversations']).parse((request.params as {kind:string}).kind),request.staff?.role==='therapist'?request.staff.therapistId??undefined:undefined));
@@ -174,7 +180,7 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
     app.post('/v1/demo/conversations', request => demo.create(z.strictObject({ name:z.string().trim().min(2).max(70).optional() }).parse(request.body ?? {}).name));
     app.get('/v1/demo/conversations/:id', request => demo.get(id.parse((request.params as {id:string}).id)));
     app.post('/v1/demo/conversations/:id/messages', request => {
-      const input = z.strictObject({ messageId:id,text:z.string().trim().min(1).max(500).optional(),action:z.enum(['start','more','select','confirm','human','reschedule','cancel','confirm_cancel','keep','confirm_week','discard_week']).optional(),slotId:id.optional(),appointmentId:id.optional() })
+      const input = z.strictObject({ messageId:id,text:z.string().trim().min(1).max(500).optional(),action:z.enum(['start','more','select','confirm','human','reschedule','cancel','cancel_week','confirm_cancel','keep','confirm_week','discard_week']).optional(),slotId:id.optional(),appointmentId:id.optional() })
         .refine(value=>value.text || value.action).refine(value=>!(value.text&&value.action)).parse(request.body);
       return demo.send(id.parse((request.params as {id:string}).id),input);
     });

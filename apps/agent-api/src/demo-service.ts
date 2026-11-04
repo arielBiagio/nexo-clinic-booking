@@ -3,19 +3,20 @@ import { Temporal } from '@js-temporal/polyfill';
 import { ClinicRepository, DomainError } from '../../../packages/db/src/repository.js';
 import { withSavepoints } from '../../../packages/db/src/savepoints.js';
 import { isExplicitConfirmation, ProviderError, type AvailabilityInput, type IntentModel, type OfferedSlot } from '../../../packages/agent/src/openrouter.js';
-import { normalizeAvailabilitySearch, requestedLocalTime, offeredSelection, rejectsSelectedSlot,isCancellationRequest,isCancellationConfirmation,isRescheduleRequest } from '../../../packages/agent/src/search.js';
+import { normalizeAvailabilitySearch, requestedLocalTime, offeredSelection, rejectsSelectedSlot,isCancellationRequest,isCancellationConfirmation,isRescheduleRequest,requestsWholeCancellationWeek } from '../../../packages/agent/src/search.js';
 import { requestedLocalDate } from '../../../packages/agent/src/calendar.js';
 import { renderNarration, type NarrationContext } from '../../../packages/agent/src/narration.js';
 import { groundedPatientPatch, missingContact, explicitPatientInfo,type PatientDetails } from '../../../packages/core/src/patient.js';
-import { isWeeklyConfirmation,type WeeklyInput } from '../../../packages/agent/src/weekly.js';
+import { isWeeklyConfirmation,normalizeWeeklyText,type WeeklyInput } from '../../../packages/agent/src/weekly.js';
 import { proposeWeekly,bookWeekly,type WeeklyState } from './weekly-booking.js';
+import { getCancellationWeek,cancelAppointmentWeek,type CancellationTarget } from '../../../packages/db/src/weekly-cancellation.js';
 
 export interface DemoMessage { id: string; role: 'patient' | 'assistant' | 'staff'; text: string; at: string }
-export type ChatAction='start'|'more'|'select'|'confirm'|'human'|'reschedule'|'cancel'|'confirm_cancel'|'keep'|'confirm_week'|'discard_week';
+export type ChatAction='start'|'more'|'select'|'confirm'|'human'|'reschedule'|'cancel'|'cancel_week'|'confirm_cancel'|'keep'|'confirm_week'|'discard_week';
 export interface DemoChoice { label: string; action: ChatAction; slotId?: string;appointmentId?:string }
 interface UpcomingAppointment {id:string;therapistId:string;therapistName:string;start:string;end:string;version:number}
 export interface ChatView {id:string;status:string;name:string;messages:DemoMessage[];choices:DemoChoice[];patient:PatientDetails;hasAppointment:boolean;appointments:UpcomingAppointment[];ai:{provider:string;model:string|null;error:string|null}}
-interface Session { messages: DemoMessage[]; choices: DemoChoice[]; selected: string | null; processed: Set<string>; offered:OfferedSlot[]; modelRequests:number;modelWindowStart:number; clarificationCount:number; providerError:string|null;search:AvailabilityInput|null;rescheduling:{id:string;version:number}|null;cancellation:{id:string;version:number;expiresAt:number}|null;weekly:WeeklyState|null }
+interface Session { messages: DemoMessage[]; choices: DemoChoice[]; selected: string | null; processed: Set<string>; offered:OfferedSlot[]; modelRequests:number;modelWindowStart:number; clarificationCount:number; providerError:string|null;search:AvailabilityInput|null;rescheduling:{id:string;version:number}|null;cancellation:{id:string;version:number;expiresAt:number;week?:CancellationTarget[]}|null;weekly:WeeklyState|null }
 type StoredSession = Omit<Session,'messages'|'selected'|'processed'> & {processed:string[]; inputs:[string,string][]};
 export interface ChatInput { messageId: string; text?: string | undefined; action?: ChatAction|undefined; slotId?: string | undefined;appointmentId?:string|undefined }
 
@@ -148,7 +149,7 @@ export class DemoService {
     }
     if(row.status!=='active')session.weekly=null;
     const appointments=(await this.repository.getUpcomingAppointments(id)).map(a=>({id:a.id,therapistId:a.therapist_id,therapistName:a.therapist_name,start:new Date(a.starts_at).toISOString(),end:new Date(a.ends_at).toISOString(),version:a.version}));
-    if(session.cancellation&&(session.cancellation.expiresAt<=Date.now()||!appointments.some(a=>a.id===session.cancellation!.id&&a.version===session.cancellation!.version))){
+    if(session.cancellation&&(session.cancellation.expiresAt<=Date.now()||(session.cancellation.week??[session.cancellation]).some(target=>!appointments.some(a=>a.id===target.id&&a.version===target.version)))){
       session.cancellation=null;session.choices=[{label:'Revisar mis turnos para cancelar',action:'cancel'},{label:'Hablar con recepción',action:'human'}];
     }
     if(session.rescheduling&&!appointments.some(a=>a.id===session.rescheduling!.id&&a.version===session.rescheduling!.version)){
@@ -182,6 +183,7 @@ export class DemoService {
   }
 
   private async prepareCancellation(id:string,session:Session,current:ChatView,appointmentId:string|null,text:string){
+    if(requestsWholeCancellationWeek(text))return this.prepareWeekCancellation(id,session,current,appointmentId,text);
     session.weekly=null;
     session.cancellation=null;session.rescheduling=null;session.selected=null;session.offered=[];session.providerError=null;
     await this.repository.db.query('update public.conversations set pending_slot_id=null,pending_expires_at=null where id=$1',[id]);
@@ -203,6 +205,43 @@ export class DemoService {
     session.cancellation={id:target.id,version:target.version,expiresAt:Date.now()+600_000};
     this.add(session,'assistant',`Tu turno es el ${when(target)} con ${target.therapistName}. ¿Confirmás que querés cancelarlo?`);
     session.choices=[{label:'Sí, cancelar este turno',action:'confirm_cancel'},{label:'Cambiar de horario',action:'reschedule',appointmentId:target.id},{label:'Mantener el turno',action:'keep'}];
+    const day=Temporal.Instant.from(target.start).toZonedDateTimeISO(zone).toPlainDate();
+    const monday=day.subtract({days:day.dayOfWeek-1});
+    const weekCount=current.appointments.filter(a=>{
+      const date=Temporal.Instant.from(a.start).toZonedDateTimeISO(zone).toPlainDate();
+      return date.subtract({days:date.dayOfWeek-1}).equals(monday);
+    }).length;
+    if(weekCount>1)session.choices.splice(1,0,{label:`Cancelar los ${weekCount} turnos de esa semana`,action:'cancel_week',appointmentId:target.id});
+  }
+
+  private async prepareWeekCancellation(id:string,session:Session,current:ChatView,appointmentId:string|null,text:string){
+    session.weekly=null;session.cancellation=null;session.rescheduling=null;session.selected=null;session.offered=[];session.search=null;session.providerError=null;
+    await this.repository.db.query('update public.conversations set pending_slot_id=null,pending_expires_at=null where id=$1',[id]);
+    const zone=(await this.repository.db.query<{time_zone:string}>('select time_zone from public.clinics')).rows[0]!.time_zone;
+    const weekOf=(instant:string)=>{const date=Temporal.Instant.from(instant).toZonedDateTimeISO(zone).toPlainDate();return date.subtract({days:date.dayOfWeek-1}).toString();};
+    const value=normalizeWeeklyText(text),today=Temporal.Now.plainDateISO(zone);
+    let requestedWeek:string|null=null;
+    if(/\b(semana que viene|proxima semana|semana proxima)\b/.test(value))requestedWeek=today.subtract({days:today.dayOfWeek-1}).add({days:7}).toString();
+    else if(/\besta semana\b/.test(value))requestedWeek=today.subtract({days:today.dayOfWeek-1}).toString();
+    else{const date=requestedLocalDate(text,Temporal.Now.instant().toString(),zone);if(date){const day=Temporal.PlainDate.from(date);requestedWeek=day.subtract({days:day.dayOfWeek-1}).toString();}}
+    let candidates=appointmentId&&!requestedWeek?current.appointments.filter(a=>a.id===appointmentId):current.appointments;
+    if(requestedWeek)candidates=candidates.filter(a=>weekOf(a.start)===requestedWeek);
+    const weeks=[...new Map(candidates.map(a=>[weekOf(a.start),a])).entries()].sort(([a],[b])=>a.localeCompare(b));
+    const formatDate=(date:string)=>new Intl.DateTimeFormat('es-AR',{timeZone:'UTC',day:'numeric',month:'long',year:'numeric'}).format(new Date(`${date}T12:00:00Z`));
+    if(weeks.length!==1){
+      this.add(session,'assistant',weeks.length?'¿De qué semana querés cancelar todos tus turnos futuros?':'No encuentro turnos futuros confirmados para esa semana en tu ficha.');
+      session.choices=weeks.map(([week,a])=>({label:`Semana del ${formatDate(week)}`,action:'cancel_week',appointmentId:a.id}));
+      session.choices.push({label:'Mantener mis turnos',action:'keep'});return;
+    }
+    const anchor=weeks[0]![1];
+    const week=await getCancellationWeek(this.repository,anchor.id,{conversationId:id});
+    session.cancellation={id:anchor.id,version:anchor.version,expiresAt:Date.now()+600_000,week:week.appointments.map(({id,version})=>({id,version}))};
+    const when=(instant:string)=>new Intl.DateTimeFormat('es-AR',{timeZone:zone,weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(instant));
+    const lines=[`Se cancelarían ${week.appointments.length} turnos futuros de tu ficha, del ${formatDate(week.weekStart)} al ${formatDate(week.weekEnd)}:`,...week.appointments.map(a=>`• ${when(a.start)} · ${a.therapistName}`),`Zona horaria: ${zone}. Los turnos de otras semanas se conservan. ¿Confirmás la cancelación de esta lista?`];
+    // Keep the complete review readable within Telegram's message size limit.
+    let chunk='';for(const line of lines){if(chunk.length+line.length>3500){this.add(session,'assistant',chunk);chunk='';}chunk+=(chunk?'\n':'')+line;}
+    if(chunk)this.add(session,'assistant',chunk);
+    session.choices=[{label:`Sí, cancelar ${week.appointments.length} turnos`,action:'confirm_cancel'},{label:'Mantener mis turnos',action:'keep'}];
   }
 
   private async prepareWeekly(id:string,session:Session,current:ChatView,request:WeeklyInput,text:string){
@@ -252,7 +291,7 @@ export class DemoService {
       if (session.processed.has(input.messageId)) return this.get(id);
       if (session.messages.length > 120) throw new DomainError('DEMO_LIMIT_REACHED', 409);
       let action = input.action ?? (/recepci[oó]n|humano|persona|ayuda|factura|dolor|m[eé]dic/i.test(input.text ?? '') ? 'human' : 'start');
-      const text = input.text ?? ({ start: 'Quiero reservar un turno',more:'Buscar en los próximos días', select: 'Ese horario me sirve', confirm: 'Sí, confirmo el turno', human: 'Quiero hablar con recepción',reschedule:'Quiero cambiar ese turno',cancel:'Quiero cancelar ese turno',confirm_cancel:'Sí, confirmo la cancelación',keep:'Mantener mis turnos',confirm_week:'Sí, confirmo los turnos de la semana',discard_week:'Descartar la propuesta semanal' }[action]);
+      const text = input.text ?? ({ start: 'Quiero reservar un turno',more:'Buscar en los próximos días', select: 'Ese horario me sirve', confirm: 'Sí, confirmo el turno', human: 'Quiero hablar con recepción',reschedule:'Quiero cambiar ese turno',cancel:'Quiero cancelar ese turno',cancel_week:'Quiero revisar la cancelación de los turnos de esa semana',confirm_cancel:'Sí, confirmo la cancelación',keep:'Mantener mis turnos',confirm_week:'Sí, confirmo los turnos de la semana',discard_week:'Descartar la propuesta semanal' }[action]);
       // Only this conversation's persisted transcript is supplied to the model.
       this.add(session, 'patient', text);
       const pendingCancellation=session.cancellation;
@@ -279,12 +318,24 @@ export class DemoService {
         session.cancellation=null;session.choices=[{label:'Buscar horarios',action:'start'},{label:'Hablar con recepción',action:'human'}];
         this.add(session,'assistant','Tus reservas se mantienen. No cancelé ningún turno.');session.processed.add(input.messageId);return this.get(id);
       }
+      const weekChoices=session.choices.filter(c=>c.action==='cancel_week'&&c.appointmentId);
+      const chosenWeek=input.text&&weekChoices.length&&!pendingCancellation?offeredSelection(input.text,weekChoices.map(c=>({id:c.appointmentId!}))):null;
+      if(input.action==='cancel_week'||chosenWeek||input.text&&requestsWholeCancellationWeek(input.text)&&(isCancellationRequest(input.text)||pendingCancellation||weekChoices.length)&&!(pendingCancellation?.week&&isCancellationConfirmation(input.text))){
+        await this.prepareWeekCancellation(id,session,current,input.appointmentId??chosenWeek??pendingCancellation?.id??null,input.text??'');
+        session.processed.add(input.messageId);return this.get(id);
+      }
       if(input.action==='confirm_cancel'||pendingCancellation&&input.text&&isCancellationConfirmation(input.text)){
         const pending=session.cancellation;
+        if(pending?.week&&pending.week.length>1&&input.text&&/\b(cancelalo|anulalo|el turno|ese turno)\b/.test(normalizeWeeklyText(input.text))){
+          await this.prepareCancellation(id,session,current,null,input.text);session.processed.add(input.messageId);return this.get(id);
+        }
         if(!pending||pending.expiresAt<=Date.now())this.add(session,'assistant','La confirmación de cancelación venció o el turno cambió. Elegí nuevamente el turno que querés cancelar.');
         else{
-          try{await this.repository.cancelPatientAppointment(pending.id,id,pending.version);this.add(session,'assistant','Tu turno quedó cancelado y ese horario volvió a estar disponible.');}
-          catch(error){if(!(error instanceof DomainError))throw error;this.add(session,'assistant',error.code==='DELIVERY_IN_PROGRESS'?'Hay una operación en curso y no pude completar la cancelación. Intentá nuevamente en unos momentos.':'El turno cambió o ya no permite esa cancelación. No cancelé otra reserva.');}
+          try{
+            if(pending.week){const result=await cancelAppointmentWeek(this.repository,pending.id,pending.week,{conversationId:id});this.add(session,'assistant',`Quedaron cancelados los ${result.cancelled} turnos de la semana que revisaste. Los horarios volvieron a estar disponibles; tus reservas de otras semanas se conservan.`);}
+            else{await this.repository.cancelPatientAppointment(pending.id,id,pending.version);this.add(session,'assistant','Tu turno quedó cancelado y ese horario volvió a estar disponible.');}
+          }
+          catch(error){if(!(error instanceof DomainError))throw error;this.add(session,'assistant',error.code==='DELIVERY_IN_PROGRESS'?'Hay una operación en curso y no pude completar la cancelación. Intentá nuevamente en unos momentos.':pending.week?'La lista de turnos cambió o ya no permite esa cancelación. No cancelé ningún turno de esta solicitud. Volvé a revisar la semana antes de confirmar.':'El turno cambió o ya no permite esa cancelación. No cancelé otra reserva.');}
         }
         session.cancellation=null;session.choices=[{label:'Buscar horarios',action:'start'},{label:'Elegir otro turno para cancelar',action:'cancel'},{label:'Hablar con recepción',action:'human'}];
         session.processed.add(input.messageId);return this.get(id);

@@ -16,11 +16,17 @@ export function requestedTimePreference(text:string):'earliest'|'latest'|null {
 export function isCancellationRequest(text:string){
   const value=normalized(text);
   if(/\b(?:no (?:quiero |deseo |necesito |lo |la )?|sin |en vez de |do not |don't )cancel(?:ar|es|a)?\b/.test(value))return false;
-  return /\b(cancel(?:ar|o|a|alo|ame|emos|en|acion)?|anul(?:ar|o|a|alo)|dar de baja (?:el|mi) turno)\b/.test(value);
+  return /\b(cancel(?:ar|o|a|alo|alos|ame|emos|en|acion)?|anul(?:ar|o|a|alo|alos)|dar de baja (?:el|mi) turno)\b/.test(value);
 }
 export function isCancellationConfirmation(text:string){
   const value=normalized(text).replace(/[¡!¿?,.;:]/g,' ').replace(/\s+/g,' ').trim();
+  if(/^(?:si(?: confirmo)? |confirmo )?(?:(?:cancelalos|anulalos)(?: todos)?|(?:cancelar|cancela|anular|anula) todos)(?: los turnos)?(?: de (?:esta|esa|la) semana)?$/.test(value))return true;
   return /^(si(?: confirmo)?(?: la cancelacion| cancelalo| cancelalo por favor| cancelar| cancela el turno| quiero cancelarlo)?|confirmo (?:la cancelacion|cancelar(?: el turno)?)|cancelalo(?: por favor)?|dale|ok|okay|confirmo|yes cancel(?: it)?)$/.test(value);
+}
+export function requestsWholeCancellationWeek(text:string){
+  const value=normalized(text);
+  if(/^\s*no\b/.test(value)||/\b(?:no quiero|no deseo|sin|en vez de) cancelar\b/.test(value))return false;
+  return /\b(?:toda (?:esta |esa |la |una )?semana|tod[oa]s(?: mis| los| las)? (?:turnos|citas)|cancelalos(?: todos)?|anulalos(?: todos)?|todos juntos|los de (?:esta|esa|la) semana|(?:cancelar|cancela|anular|anula) todos\b|(?:cancelar|cancela|cancelame|anular|anula) (?:esta|esa|la) semana)\b/.test(value)||/^\s*todos[.!]?\s*$/.test(value);
 }
 export function isRescheduleRequest(text:string){
   const value=normalized(text);
