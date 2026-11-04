@@ -16,6 +16,8 @@
 - Reprogramación por chat o desde la agenda, conservando la reserva y los datos del paciente.
 - Cancelación por chat con elección del turno y confirmación explícita.
 - Reservas de una semana al mismo horario, con revisión de cada fecha, contacto y confirmación del conjunto.
+- Cancelación conjunta de los turnos futuros de una semana, con revisión y confirmación.
+- Google Calendar por terapeuta: conexión OAuth y copia de turnos, cambios y cancelaciones en un calendario propio.
 - Avisos por conversación con atención humana pendiente y campana con actividad de turnos.
 - Ajustes personales de notificaciones del navegador y sonidos, con acceso para cerrar sesión.
 - Modo claro y oscuro Obsidiana, con preferencia guardada.
@@ -33,4 +35,5 @@
 - Supabase Auth, PostgreSQL, PGlite y migraciones SQL.
 - OpenRouter con GPT-4o mini.
 - Telegram Bot API mediante long polling y cola persistente de envíos.
+- Google Calendar API y OAuth 2.0, con sincronización persistente en segundo plano.
 - Temporal para fechas, horarios y zonas horarias.

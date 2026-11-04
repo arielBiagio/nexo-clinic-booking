@@ -8,6 +8,7 @@ import { mkdir } from 'node:fs/promises';
 import { DemoService, populateDashboard } from './demo-service.js';
 import { OpenRouterModel } from '../../../packages/agent/src/openrouter.js';
 import { StaffAuth } from './staff-auth.js';
+import { GoogleCalendar } from './google-calendar.js';
 
 const staffMode=process.env.AUTH_MODE==='staff';
 if (process.env.NODE_ENV === 'production'&&!staffMode) throw new Error('Public servers require staff authentication');
@@ -41,11 +42,14 @@ const auth=staffMode?new StaffAuth(db,{url:required('SUPABASE_URL'),publishableK
 if(auth?.isLocal&&host!=='127.0.0.1'&&host!=='::1')throw new Error('Local staff setup requires a loopback listener');
 if(process.env.NODE_ENV==='production'&&auth?.isLocal)throw new Error('Production requires a public HTTPS origin');
 const dashboardDirectory = resolve('dist/dashboard');
-const app = buildApp(repository, token, {demo,...(existsSync(dashboardDirectory)?{dashboardDirectory}:{}),...(auth?{auth}:{})});
-app.addHook('onClose', () => db.close());
+const calendar=auth?new GoogleCalendar(db,{origin:auth.origin.origin,encryptionKey:required('SESSION_ENCRYPTION_KEY'),clientId:process.env.GOOGLE_CLIENT_ID?.trim()??'',clientSecret:process.env.GOOGLE_CLIENT_SECRET?.trim()??''}):undefined;
+const app = buildApp(repository, token, {demo,...(existsSync(dashboardDirectory)?{dashboardDirectory}:{}),...(auth?{auth}:{}),...(calendar?{calendar}:{})});
+app.addHook('onClose', async() => {await calendar?.stop();await db.close();});
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => { void app.close(); });
 }
 await app.listen({ host, port });
+calendar?.start();
 console.log(`Nexo listening at http://${host}:${port}; data ${local ? 'persists locally' : 'uses Supabase PostgreSQL'}.`);
 console.log(`Access mode: ${staffMode?'staff authentication':'local demo'}. Chat: ${intentModel?`OpenRouter / ${intentModel.model}`:'guided'}.`);
+if(calendar)console.log(`Google Calendar: ${calendar.configured?'sincronización habilitada para cuentas autorizadas':'pendiente configurar credenciales OAuth'}.`);

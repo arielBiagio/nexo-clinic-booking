@@ -156,6 +156,11 @@
 .main-shell>main>.loading-placeholder--form,.main-shell>main>.loading-placeholder--schedule{padding:24px;background:var(--surface,#fff);border:1px solid var(--border);border-radius:10px}
 .activity-popover>.loading-placeholder{padding:0 16px 12px}
 @keyframes placeholderPulse{0%,100%{opacity:1}50%{opacity:.62}}
+.calendar-connect-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.calendar-account{margin-top:12px;overflow-wrap:anywhere;font-weight:600}
+.calendar-sync-status{display:grid;gap:6px;margin-top:10px;color:var(--text-secondary,var(--muted));font-size:13px}
+.calendar-disconnect{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px;padding:14px;border:1px solid var(--border);border-radius:10px}
+.calendar-disconnect p{flex-basis:100%;line-height:1.5}
 .patient-card dd{white-space:pre-wrap;overflow-wrap:anywhere}
 .cancel-week{border-top:1px solid var(--border);margin-top:20px;padding-top:20px;display:grid;gap:12px;text-align:left}
 .cancel-week p{margin:0;line-height:1.5;color:var(--muted)}

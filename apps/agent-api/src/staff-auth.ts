@@ -161,6 +161,8 @@ export class StaffAuth {
         await db.query('update public.therapists set staff_user_id=null where staff_user_id=$1',[target]);
         if(input.role==='therapist')await db.query('update public.therapists set staff_user_id=$2 where id=$1',[input.therapistId,target]);
         await db.query('update public.staff_members set role=$2,active=$3 where user_id=$1',[target,input.role,input.active]);
+        await db.query(`update private.google_calendar_connections set status='disconnected',encrypted_tokens=null,generation=gen_random_uuid(),error_code=null
+          where staff_user_id=$1 and ($2::text<>'therapist' or not $3::boolean or therapist_id is distinct from $4::uuid)`,[target,input.role,input.active,input.therapistId]);
         await db.query('delete from private.staff_sessions where user_id=$1',[target]);
         await db.query("insert into private.staff_audit(actor_id,subject_id,action) values ($1,$2,'staff_updated')",[request.staff!.id,target]);
         return {ok:true};

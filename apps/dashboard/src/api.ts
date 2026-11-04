@@ -1,6 +1,8 @@
 import { Temporal } from '@js-temporal/polyfill';
 
 const errors:Record<string,string> = {
+  GOOGLE_NOT_CONFIGURED:'La conexión con Google todavía no está configurada en el servidor.',
+  GOOGLE_RECONNECT:'Volvé a conectar tu cuenta de Google para reanudar la sincronización.',
   PATIENT_DETAILS_CHANGED:'La ficha cambió o le falta contacto. Volvé a buscarla y revisá nombre y teléfono en Conversaciones.',
   APPOINTMENT_CHANGED:'El turno cambió mientras lo editabas. Cerrá esta ventana y volvé a abrirlo desde la agenda actualizada.',
   APPOINTMENT_NOT_EDITABLE:'Solo se pueden reprogramar reservas confirmadas que todavía no comenzaron.',

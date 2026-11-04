@@ -2,6 +2,8 @@ node_modules/
 dist/
 .env
 .env.*
+**/client_secret*.json
+**/google-credentials*.json
 .local/
 coverage/
 qa-artifacts/

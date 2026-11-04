@@ -1,9 +1,10 @@
-import { Bell, CalendarDays, LogOut, Volume2 } from 'lucide-react';
+import { Bell, LogOut, Volume2 } from 'lucide-react';
 import type { NotificationSettings } from './useNotifications';
 import type { AppearanceSettings } from './useTheme';
 import { AppearancePicker } from './AppearancePicker';
+import { GoogleCalendarSettings } from './GoogleCalendarSettings';
 
-export function Preferences({settings,appearance,canLogout,onLogout}:{settings:NotificationSettings;appearance:AppearanceSettings;canLogout:boolean;onLogout:()=>void}){
+export function Preferences({settings,appearance,canLogout,onLogout,calendarResult}:{settings:NotificationSettings;appearance:AppearanceSettings;canLogout:boolean;onLogout:()=>void;calendarResult:string|null}){
   return <div className="preferences-content">
     <p className="preferences-intro">Configurá tus avisos y las conexiones de tu agenda.</p>
     <AppearancePicker appearance={appearance}/>
@@ -17,12 +18,9 @@ export function Preferences({settings,appearance,canLogout,onLogout}:{settings:N
       {!settings.soundSupported&&<p className="preference-note">Este navegador no admite el sonido de avisos.</p>}
       {settings.soundSupported&&settings.soundEnabled&&!settings.soundReady&&<p className="preference-note">Interactuá con el panel para habilitar el audio en esta pestaña.</p>}
     </section>
-    <section className="preference-group calendar-integration" aria-labelledby="google-calendar-heading">
-      <div className="integration-heading"><CalendarDays size={19}/><div><h3 id="google-calendar-heading">Google Calendar</h3><p>Sincronizar los turnos con tu calendario.</p></div><span className="small-tag">Próximamente</span></div>
-      <button className="secondary-button" disabled>Conectar Google Calendar</button>
-    </section>
+    <GoogleCalendarSettings staffMode={canLogout} result={calendarResult}/>
     {settings.error&&<p className="form-error" role="status">{settings.error}</p>}
-    <p className="preference-note">Se guarda para tu usuario en este navegador. Los avisos funcionan mientras el panel está abierto.</p>
+    <p className="preference-note">La apariencia y los avisos se guardan para tu usuario en este navegador. Los avisos funcionan mientras el panel está abierto.</p>
     {canLogout&&<div className="preferences-account"><button className="secondary-button full" onClick={onLogout}><LogOut size={17}/>Cerrar sesión</button></div>}
   </div>;
 }

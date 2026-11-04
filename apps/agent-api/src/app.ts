@@ -7,6 +7,7 @@ import type { DemoService } from './demo-service.js';
 import { patientDetailsInput } from '../../../packages/core/src/patient.js';
 import type { StaffAuth } from './staff-auth.js';
 import { getCancellationWeek,cancelAppointmentWeek } from '../../../packages/db/src/weekly-cancellation.js';
+import type { GoogleCalendar } from './google-calendar.js';
 
 const id = z.uuid();
 const selection = z.strictObject({ slotId: id });
@@ -16,7 +17,7 @@ const handoff = z.strictObject({ reason: z.enum(['requested_human', 'not_underst
 const digest = (value: string) => createHash('sha256').update(value).digest();
 
 /** Staff sessions are verified before every API request; demo cookies exist only without StaffAuth. */
-export function buildApp(repository: ClinicRepository, token: string, options: { dashboardDirectory?: string; demo?: DemoService;auth?:StaffAuth } = {}) {
+export function buildApp(repository: ClinicRepository, token: string, options: { dashboardDirectory?: string; demo?: DemoService;auth?:StaffAuth;calendar?:GoogleCalendar } = {}) {
   if (!options.auth&&token.length < 32) throw new Error('DEMO_API_TOKEN must contain at least 32 characters');
   const app = Fastify({ logger: false, bodyLimit: 16_384, requestTimeout: 10_000 });
   const localSession = randomBytes(32).toString('base64url');
@@ -36,7 +37,7 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
     if(options.auth){
       if(host!==options.auth.origin.host)throw new DomainError('HOST_NOT_ALLOWED',403);
       options.auth.assertOrigin(request);
-      if(['/v1/auth/status','/v1/auth/session','/v1/auth/login','/v1/auth/setup','/v1/auth/logout'].includes(pathname??''))return;
+      if(['/v1/auth/status','/v1/auth/session','/v1/auth/login','/v1/auth/setup','/v1/auth/logout','/v1/integrations/google-calendar/callback'].includes(pathname??''))return;
       request.staff=await options.auth.authenticate(request);
       if(pathname?.startsWith('/v1/staff')&&request.staff.role!=='admin')throw new DomainError('FORBIDDEN',403);
       if(request.staff.role==='therapist'){
@@ -45,6 +46,7 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
         let allowed=method==='GET'&&(['/v1/auth/me','/v1/dashboard','/v1/therapists','/v1/demo/removed/appointments','/v1/patients/search'].includes(route)||route==='/v1/availability'&&new URL(request.url,'http://local').searchParams.get('therapistId')===own);
         if(route===`/v1/therapists/${own}/profile`&&['GET','PATCH'].includes(method)||route===`/v1/therapists/${own}/schedule`&&['GET','PUT'].includes(method)||route===`/v1/therapists/${own}/time-off`&&method==='POST'||route.startsWith(`/v1/therapists/${own}/time-off/`)&&method==='DELETE'||route===`/v1/therapists/${own}/appointments`&&method==='POST')allowed=true;
         if(own&&(route==='/v1/activity'&&method==='GET'||route==='/v1/activity/read'&&method==='POST'))allowed=true;
+        if(own&&(route==='/v1/integrations/google-calendar/status'&&method==='GET'||['/v1/integrations/google-calendar/connect','/v1/integrations/google-calendar/sync','/v1/integrations/google-calendar/disconnect'].includes(route)&&method==='POST'))allowed=true;
         const appointment=route.match(/^\/v1\/appointments\/([^/]+)(\/restore|\/reschedule|\/cancellation-week)?$/);
         if(appointment&&(method==='DELETE'&&!appointment[2]||method==='POST'&&appointment[2]||method==='GET'&&appointment[2]==='/cancellation-week')){
           const row=(await repository.db.query('select therapist_id from public.appointments where id=$1',[id.parse(appointment[1])])).rows[0];
@@ -89,6 +91,7 @@ export function buildApp(repository: ClinicRepository, token: string, options: {
     app.get('/v1/auth/session',async()=>({mode:'demo',setupRequired:false,user:{id:'local',name:'Admin',email:'',role:'admin',therapistId:null}}));
     app.get('/v1/auth/me',async()=>({mode:'demo',user:{id:'local',name:'Admin',email:'',role:'admin',therapistId:null}}));
   }
+  if(options.auth&&options.calendar)options.calendar.register(app);
   app.get('/v1/therapists', async request => (await repository.getTherapists()).filter(t=>request.staff?.role!=='therapist'||t.id===request.staff.therapistId));
   app.get('/v1/therapists/:id/profile',request=>repository.getTherapistProfile(id.parse((request.params as {id:string}).id)));
   app.patch('/v1/therapists/:id/profile',request=>repository.updateTherapistProfile(id.parse((request.params as {id:string}).id),z.strictObject({name:z.string().trim().min(2).max(70),specialty:z.string().trim().min(2).max(120)}).parse(request.body),request.staff));
