@@ -27,7 +27,8 @@ export function GoogleCalendarSettings({staffMode,result}:{staffMode:boolean;res
     {staffMode&&!status&&!error&&<LoadingPlaceholder variant="list" label="Consultando conexión con Google"/>}
     {(!staffMode||status&&!status.eligible)&&<p className="preference-note">Cada terapeuta conecta su propia cuenta desde sus ajustes. Entrá con un acceso de terapeuta para habilitarla.</p>}
     {status?.eligible&&<>
-      <p className="preference-note">Nexo · Turnos muestra el nombre del paciente, el horario y el profesional. Reservá, cambiá y cancelá desde Nexo. Los eventos personales de Google no bloquean esta agenda.</p>
+      <p className="preference-note">Nexo · Turnos incluye paciente, día, hora, profesional y los datos disponibles de su ficha: teléfono, seguro de salud, diagnóstico referido e información adicional. Google administra el correo de nuevos eventos y el recordatorio 30 minutos antes. Activá la sincronización de este calendario y los avisos en tu celular.</p>
+      <p className="preference-note">Reservá, cambiá y cancelá desde Nexo. Los eventos personales de Google no bloquean esta agenda.</p>
       {!status.configured&&<p className="preference-note">Falta configurar la conexión de Google en el servidor.</p>}
       {status.email&&<p className="calendar-account">{status.email}</p>}
       {linked&&<div className="calendar-sync-status" aria-live="polite"><span>{status.lastSyncedAt?`Última sincronización: ${new Intl.DateTimeFormat('es-AR',{dateStyle:'short',timeStyle:'short'}).format(new Date(status.lastSyncedAt))}`:'Esperando primera sincronización'}</span>{Boolean(status.pending)&&<span>{status.pending} {status.pending===1?'turno pendiente':'turnos pendientes'}</span>}{Boolean(status.failed)&&<span className="form-error">{status.failed} {status.failed===1?'turno necesita reintento':'turnos necesitan reintento'}</span>}{status.status==='reauth_required'&&<span>Autorizá Google nuevamente para reanudar la sincronización.</span>}</div>}

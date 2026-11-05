@@ -18,6 +18,7 @@
 - Reservas de una semana al mismo horario, con revisión de cada fecha, contacto y confirmación del conjunto.
 - Cancelación conjunta de los turnos futuros de una semana, con revisión y confirmación.
 - Google Calendar por terapeuta: conexión OAuth y copia de turnos, cambios y cancelaciones en un calendario propio.
+- Datos de la ficha en Google Calendar, avisos de nuevos eventos por correo y recordatorios 30 minutos antes.
 - Avisos por conversación con atención humana pendiente y campana con actividad de turnos.
 - Ajustes personales de notificaciones del navegador y sonidos, con acceso para cerrar sesión.
 - Modo claro y oscuro Obsidiana, con preferencia guardada.

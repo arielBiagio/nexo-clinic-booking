@@ -9,6 +9,7 @@ const base='/v1/integrations/google-calendar',scope='https://www.googleapis.com/
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const cookie=(request:FastifyRequest,name:string)=>request.headers.cookie?.split(';').map(s=>s.trim()).find(s=>s.startsWith(`${name}=`))?.slice(name.length+1)??'';
 const time=(value:unknown)=>value instanceof Date?value.toISOString():new Date(String(value)).toISOString();
+const html=(value:string)=>value.replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]!));
 type Connection={id:string;therapist_id:string;staff_user_id:string;google_sub:string;email:string;calendar_id:string|null;encrypted_tokens:string|null;generation:string;status:string};
 type Job={connection_id:string;appointment_id:string;revision:string|number;epoch:number;remote_event_id:string|null;lease_id:string;attempts:number;generation:string;calendar_id:string;therapist_id:string};
 type Options={origin:string;encryptionKey:string;clientId:string;clientSecret:string};
@@ -23,6 +24,7 @@ export class GoogleCalendar {
   private running:Promise<void>|undefined;
   private stopping=false;
   private reconciledAt=0;
+  private readonly notificationPolicies=new Map<string,string>();
   constructor(private readonly db:Sql,private readonly options:Options){
     this.callbackUrl=new URL(`${base}/callback`,options.origin).toString();
     this.key=createHash('sha256').update('nexo-google-calendar-v1').update(Buffer.from(options.encryptionKey,'base64url')).digest();
@@ -121,14 +123,25 @@ export class GoogleCalendar {
         const calendar=await this.api.request<{id:string}>(tokens.access_token,'/calendars','POST',{summary:'Nexo · Turnos',description:'Turnos gestionados desde Nexo. Los cambios se realizan en Nexo.',timeZone:clinic.time_zone});
         if(!calendar.id)throw new GoogleError('GOOGLE_TEMPORARY');calendarId=calendar.id;
       }
+      await this.configureNotifications(<T>(path:string,method='GET',body?:unknown)=>this.api.request<T>(tokens.access_token,path,method,body),calendarId);
       await this.db.transaction(async db=>{
         const updated=await db.query(`update private.google_calendar_connections c set calendar_id=$2,status='connected',error_code=null where id=$1 and generation=$3
           and exists(select 1 from public.therapists t join public.staff_members s on s.user_id=t.staff_user_id where t.id=c.therapist_id and s.user_id=c.staff_user_id and s.active and s.role='therapist') returning id`,[connection.id,calendarId,generation]);
         if(!updated.rows.length)throw new GoogleError('GOOGLE_AUTH_FAILED');
         if(calendarId!==connection.calendar_id)await db.query('update private.google_calendar_jobs set remote_event_id=null,epoch=epoch+1 where connection_id=$1',[connection.id]);
       });
+      this.notificationPolicies.set(connection.id,`${generation}:${calendarId}`);
       await this.enqueue(connection.id);
     }catch(error){await this.db.query("update private.google_calendar_connections set error_code='GOOGLE_RECONNECT' where id=$1 and generation=$2",[connection.id,generation]);throw error;}
+  }
+  private async configureNotifications(call:<T>(path:string,method?:string,body?:unknown)=>Promise<T>,calendarId:string){
+    const path=`/users/me/calendarList/${encodeURIComponent(calendarId)}`;
+    const calendar=await call<{notificationSettings?:{notifications?:{type:string;method:string}[]}}>(path);
+    const notifications=calendar.notificationSettings?.notifications??[];
+    // Keep the therapist's other calendar notifications and reminder preferences.
+    if(!notifications.some(item=>item.type==='eventCreation'&&item.method==='email')){
+      await call(path,'PATCH',{notificationSettings:{notifications:[...notifications,{type:'eventCreation',method:'email'}]}});
+    }
   }
   private async enqueue(connectionId:string,manual=true){
     await this.db.query(`insert into private.google_calendar_jobs(connection_id,appointment_id)
@@ -159,7 +172,12 @@ export class GoogleCalendar {
   private async synchronize(job:Job){
     const token=await this.access(job);
     const call=async<T>(path:string,method='GET',body?:unknown)=>{await this.live(job);return this.api.request<T>(token,path,method,body);};
-    const appointment=(await this.db.query<{status:string;therapist_id:string;starts_at:Date|string;ends_at:Date|string;patient_name:string;therapist_name:string;time_zone:string}>(`select a.status,a.therapist_id,a.starts_at,a.ends_at,p.name as patient_name,t.name as therapist_name,c.time_zone
+    const policy=`${job.generation}:${job.calendar_id}`;
+    if(this.notificationPolicies.get(job.connection_id)!==policy){
+      await this.configureNotifications(call,job.calendar_id);
+      this.notificationPolicies.set(job.connection_id,policy);
+    }
+    const appointment=(await this.db.query<{status:string;therapist_id:string;starts_at:Date|string;ends_at:Date|string;patient_name:string;phone:string|null;insurance:string|null;reported_reason:string|null;additional_info:string|null;therapist_name:string;time_zone:string}>(`select a.status,a.therapist_id,a.starts_at,a.ends_at,p.name as patient_name,p.phone,p.insurance,p.reported_reason,p.additional_info,t.name as therapist_name,c.time_zone
       from public.appointments a join public.patients p on p.id=a.patient_id join public.therapists t on t.id=a.therapist_id cross join public.clinics c where a.id=$1`,[job.appointment_id])).rows[0];
     const confirmed=appointment?.status==='confirmed'&&appointment.therapist_id===job.therapist_id;
     const root=`/calendars/${encodeURIComponent(job.calendar_id)}/events`;
@@ -176,7 +194,13 @@ export class GoogleCalendar {
       const mapped=await this.db.query(`update private.google_calendar_jobs j set remote_event_id=$4 where connection_id=$1 and appointment_id=$2 and lease_id=$3
         and exists(select 1 from private.google_calendar_connections c where c.id=j.connection_id and c.generation=$5 and c.status='connected') returning appointment_id`,[job.connection_id,job.appointment_id,job.lease_id,target,job.generation]);
       if(!mapped.rows.length)throw new GoogleError('GOOGLE_CONNECTION_STOPPED');
-      const body={summary:`Fisio · ${appointment.patient_name}`,description:`Turno gestionado desde Nexo.\nProfesional: ${appointment.therapist_name}.\nLos cambios y cancelaciones se realizan en Nexo.`,start:{dateTime:time(appointment.starts_at),timeZone:appointment.time_zone},end:{dateTime:time(appointment.ends_at),timeZone:appointment.time_zone},visibility:'private',transparency:'opaque',reminders:{useDefault:true},extendedProperties:{private:{nexoAppointmentId:job.appointment_id}}};
+      const when=new Intl.DateTimeFormat('es-AR',{timeZone:appointment.time_zone,weekday:'long',day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(time(appointment.starts_at)));
+      const description=[`Paciente: ${appointment.patient_name}`,`Turno: ${when} (${appointment.time_zone})`,`Profesional: ${appointment.therapist_name}`,
+        appointment.phone?`Teléfono: ${appointment.phone}`:null,appointment.insurance?`Seguro de salud: ${appointment.insurance}`:null,
+        appointment.reported_reason?`Diagnóstico o motivo referido por el paciente (no verificado): ${appointment.reported_reason}`:null,
+        appointment.additional_info?`Información adicional: ${appointment.additional_info}`:null,
+        'Los cambios y cancelaciones se realizan en Nexo.'].filter((line):line is string=>line!==null).map(line=>html(line).replace(/\r?\n/g,'<br>')).join('<br>');
+      const body={summary:`Fisio · ${appointment.patient_name}`,description,start:{dateTime:time(appointment.starts_at),timeZone:appointment.time_zone},end:{dateTime:time(appointment.ends_at),timeZone:appointment.time_zone},visibility:'private',transparency:'opaque',reminders:{useDefault:false,overrides:[{method:'popup',minutes:30}]},extendedProperties:{private:{nexoAppointmentId:job.appointment_id}}};
       try{await call(`${root}/${target}?sendUpdates=none`,'PUT',body);}
       catch(error){
         if(!(error instanceof GoogleError)||![404,410].includes(error.status))throw error;
