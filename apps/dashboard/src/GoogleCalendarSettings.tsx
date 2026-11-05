@@ -3,7 +3,8 @@ import { CalendarDays,ExternalLink,RefreshCw,Unplug } from 'lucide-react';
 import { api } from './api';
 import { LoadingPlaceholder } from './LoadingPlaceholder';
 
-type Status={eligible:boolean;configured:boolean;status?:'connected'|'reauth_required'|'disconnected';email?:string;emailNotifications?:'configured'|'permission_required'|'retry_pending';lastSyncedAt?:string|null;pending?:number;failed?:number;error?:string|null};
+type Status={eligible:boolean;configured:boolean;status?:'connected'|'reauth_required'|'disconnected';email?:string;gmailEnabled?:boolean;gmailError?:string|null;gmailLastSentAt?:string|null;gmailPending?:number;gmailFailed?:number;gmailUnknown?:number;lastSyncedAt?:string|null;pending?:number;failed?:number;error?:string|null};
+const mailErrors:Record<string,string>={GMAIL_API_DISABLED:'Falta habilitar Gmail API en el proyecto de Google Cloud. Después, tocá Sincronizar ahora para reintentar.',GMAIL_PERMISSION:'Reconectá Google y autorizá el envío de correo.',GOOGLE_RECONNECT:'Reconectá Google para renovar el permiso de envío.',GOOGLE_AUTH_FAILED:'No se pudo renovar el acceso de Gmail. Reconectá Google.'};
 const callbackMessages:Record<string,string>={connected:'Cuenta conectada. Tus próximos turnos se copiarán a Google.',denied:'No autorizaste la conexión. Podés volver a intentarlo.',expired:'La autorización venció. Volvé a iniciar la conexión desde aquí.',account_in_use:'Esa cuenta de Google ya está conectada a otro terapeuta. Elegí tu propia cuenta.',account_changed:'Primero desconectá la cuenta actual para elegir otra cuenta de Google.',failed:'No pudimos completar la conexión. Revisá que Google Calendar esté habilitado y volvé a intentarlo.'};
 export function GoogleCalendarSettings({staffMode,result}:{staffMode:boolean;result:string|null}){
   const [status,setStatus]=useState<Status|null>(null),[error,setError]=useState(''),[note,setNote]=useState(result?callbackMessages[result]??'':''),[busy,setBusy]=useState(false),[confirmDisconnect,setConfirmDisconnect]=useState(false);
@@ -27,19 +28,27 @@ export function GoogleCalendarSettings({staffMode,result}:{staffMode:boolean;res
     {staffMode&&!status&&!error&&<LoadingPlaceholder variant="list" label="Consultando conexión con Google"/>}
     {(!staffMode||status&&!status.eligible)&&<p className="preference-note">Cada terapeuta conecta su propia cuenta desde sus ajustes. Entrá con un acceso de terapeuta para habilitarla.</p>}
     {status?.eligible&&<>
-      <p className="preference-note">Nexo · Turnos incluye paciente, día, hora, profesional y los datos disponibles de su ficha: teléfono, seguro de salud, diagnóstico referido e información adicional. Google administra el correo de nuevos eventos y el recordatorio 30 minutos antes. Activá la sincronización de este calendario y los avisos en tu celular.</p>
+      <p className="preference-note">Nexo · Turnos incluye paciente, día, hora, profesional y los datos disponibles de su ficha: teléfono, seguro de salud, diagnóstico referido e información adicional. Calendar recuerda el turno 30 minutos antes. Activá la sincronización de este calendario y los avisos en tu celular.</p>
       <p className="preference-note">Reservá, cambiá y cancelá desde Nexo. Los eventos personales de Google no bloquean esta agenda.</p>
       {!status.configured&&<p className="preference-note">Falta configurar la conexión de Google en el servidor.</p>}
       {status.email&&<p className="calendar-account">{status.email}</p>}
-      {connected&&status.emailNotifications==='permission_required'&&<p className="preference-note" role="status">Tus turnos siguen sincronizándose. Para habilitar el correo de nuevos eventos, reconectá Google y autorizá el permiso de ajustes de calendarios.</p>}
-      {connected&&status.emailNotifications==='retry_pending'&&<p className="preference-note" role="status">Los avisos por correo están pendientes de configuración. La sincronización de turnos sigue activa.</p>}
+      {linked&&<div className="calendar-sync-status" aria-live="polite">
+        <strong>Avisos por Gmail</strong><span>Las reservas nuevas se avisan desde tu Gmail hacia esa misma dirección, con los datos disponibles del paciente. Nexo solicita permiso para enviar, sin leer tu bandeja.</span>
+        {!status.gmailEnabled&&<span>Falta autorizar el envío: habilitá Gmail API en Google Cloud y tocá Reconectar Google. La copia de turnos sigue siendo independiente.</span>}
+        {status.gmailError&&<span className="form-error">{mailErrors[status.gmailError]??'El envío de correo necesita un reintento. La copia de turnos no se detiene.'}</span>}
+        {status.gmailEnabled&&!status.gmailError&&<span>Envío autorizado</span>}
+        {Boolean(status.gmailPending)&&<span>{status.gmailPending} {status.gmailPending===1?'aviso pendiente':'avisos pendientes'}</span>}
+        {Boolean(status.gmailFailed)&&<span className="form-error">{status.gmailFailed} {status.gmailFailed===1?'aviso rechazado':'avisos rechazados'}. Tocá Sincronizar ahora para reintentar.</span>}
+        {Boolean(status.gmailUnknown)&&<span className="form-error">No se pudo confirmar el envío de {status.gmailUnknown} {status.gmailUnknown===1?'aviso':'avisos'}. Revisá Recibidos y Enviados; no se reenvían automáticamente para evitar duplicados.</span>}
+        {status.gmailLastSentAt&&<span>Último envío aceptado por Gmail: {new Intl.DateTimeFormat('es-AR',{dateStyle:'short',timeStyle:'short'}).format(new Date(status.gmailLastSentAt))}</span>}
+      </div>}
       {linked&&<div className="calendar-sync-status" aria-live="polite"><span>{status.lastSyncedAt?`Última sincronización: ${new Intl.DateTimeFormat('es-AR',{dateStyle:'short',timeStyle:'short'}).format(new Date(status.lastSyncedAt))}`:'Esperando primera sincronización'}</span>{Boolean(status.pending)&&<span>{status.pending} {status.pending===1?'turno pendiente':'turnos pendientes'}</span>}{Boolean(status.failed)&&<span className="form-error">{status.failed} {status.failed===1?'turno necesita reintento':'turnos necesitan reintento'}</span>}{status.status==='reauth_required'&&<span>Autorizá Google nuevamente para reanudar la sincronización.</span>}</div>}
       <div className="calendar-connect-actions">
         <button className="secondary-button" disabled={busy||!status.configured} onClick={()=>void act('connect')}><ExternalLink size={15}/>{linked?'Reconectar Google':'Conectar Google Calendar'}</button>
         {connected&&<button className="secondary-button" disabled={busy||!status.configured} onClick={()=>void act('sync')}><RefreshCw size={15}/>Sincronizar ahora</button>}
         {linked&&!confirmDisconnect&&<button className="secondary-button" disabled={busy} onClick={()=>setConfirmDisconnect(true)}><Unplug size={15}/>Desconectar</button>}
       </div>
-      {!linked&&status.configured&&<p className="preference-note">Al conectar, autorizás copiar tus próximos turnos. Si Google no permite autorizar en este navegador, abrí Nexo en Chrome o Edge.</p>}
+      {!linked&&status.configured&&<p className="preference-note">Al conectar, autorizás copiar tus próximos turnos y enviar avisos de reservas nuevas desde tu Gmail hacia tu misma dirección. Para el correo debe estar habilitada Gmail API en Google Cloud. Si Google no permite autorizar en este navegador, abrí Nexo en Chrome o Edge.</p>}
       {confirmDisconnect&&<div className="calendar-disconnect"><p>Se detendrá la sincronización. Los eventos existentes permanecerán en Google y tus turnos se conservarán en Nexo.</p><button className="danger-button" disabled={busy} onClick={()=>void act('disconnect')}>Confirmar desconexión</button><button className="secondary-button" disabled={busy} onClick={()=>setConfirmDisconnect(false)}>Volver</button></div>}
     </>}
     {note&&<p className="preference-note" role="status">{note}</p>}{error&&<p className="form-error" role="alert">{error}</p>}

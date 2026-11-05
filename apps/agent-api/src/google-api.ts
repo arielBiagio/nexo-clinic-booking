@@ -26,6 +26,21 @@ export class GoogleApi {
     if(response.status===204)return undefined as T;
     return response.json() as Promise<T>;
   }
+  async sendMail(accessToken:string,raw:string):Promise<{id:string}>{
+    let response:Response;
+    try{response=await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send',{method:'POST',headers:{Authorization:`Bearer ${accessToken}`,'Content-Type':'application/json'},body:JSON.stringify({raw}),signal:AbortSignal.timeout(10_000)});}
+    catch{throw new GoogleError('GMAIL_DELIVERY_UNKNOWN');}
+    if(!response.ok){
+      const value=await response.json().catch(()=>({})) as {error?:{errors?:{reason?:string}[];details?:{reason?:string}[]}};
+      const reasons=[...(value.error?.errors??[]),...(value.error?.details??[])].map(error=>error.reason);
+      const rate=response.status===429||reasons.some(reason=>['rateLimitExceeded','userRateLimitExceeded','dailyLimitExceeded','quotaExceeded'].includes(reason??''));
+      const disabled=reasons.some(reason=>['accessNotConfigured','SERVICE_DISABLED'].includes(reason??''));
+      throw new GoogleError(response.status===401?'GOOGLE_RECONNECT':rate?'GMAIL_RATE_LIMIT':disabled?'GMAIL_API_DISABLED':response.status===403?'GMAIL_PERMISSION':response.status>=500?'GMAIL_DELIVERY_UNKNOWN':'GMAIL_SEND_REJECTED',response.status,Math.min(3600,Number(response.headers.get('retry-after'))||0));
+    }
+    const result=await response.json().catch(()=>null) as {id?:unknown}|null;
+    if(typeof result?.id!=='string')throw new GoogleError('GMAIL_DELIVERY_UNKNOWN');
+    return {id:result.id};
+  }
   async identity(accessToken:string){
     let response:Response;
     try{response=await fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:`Bearer ${accessToken}`},signal:AbortSignal.timeout(10_000)});}

@@ -18,7 +18,8 @@
 - Reservas de una semana al mismo horario, con revisión de cada fecha, contacto y confirmación del conjunto.
 - Cancelación conjunta de los turnos futuros de una semana, con revisión y confirmación.
 - Google Calendar por terapeuta: conexión OAuth y copia de turnos, cambios y cancelaciones en un calendario propio.
-- Datos de la ficha en Google Calendar, avisos de nuevos eventos por correo y recordatorios 30 minutos antes.
+- Datos de la ficha en Google Calendar y recordatorios 30 minutos antes.
+- Avisos de nuevas reservas por Gmail, desde y hacia la cuenta autorizada del terapeuta, con cola persistente.
 - Avisos por conversación con atención humana pendiente y campana con actividad de turnos.
 - Ajustes personales de notificaciones del navegador y sonidos, con acceso para cerrar sesión.
 - Modo claro y oscuro Obsidiana, con preferencia guardada.
@@ -36,5 +37,5 @@
 - Supabase Auth, PostgreSQL, PGlite y migraciones SQL.
 - OpenRouter con GPT-6 Luna.
 - Telegram Bot API mediante long polling y cola persistente de envíos.
-- Google Calendar API y OAuth 2.0, con sincronización persistente en segundo plano.
+- Google Calendar API, Gmail API y OAuth 2.0, con sincronización y avisos persistentes en segundo plano.
 - Temporal para fechas, horarios y zonas horarias.

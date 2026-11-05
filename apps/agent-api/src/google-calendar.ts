@@ -4,33 +4,34 @@ import { z } from 'zod';
 import type { Sql } from '../../../packages/db/src/client.js';
 import { DomainError } from '../../../packages/db/src/repository.js';
 import { GoogleApi,GoogleError,type GoogleTokens } from './google-api.js';
+import { GmailBookings } from './gmail-bookings.js';
 
-const base='/v1/integrations/google-calendar',scope='https://www.googleapis.com/auth/calendar.app.created',calendarListScope='https://www.googleapis.com/auth/calendar.calendarlist';
+const base='/v1/integrations/google-calendar',scope='https://www.googleapis.com/auth/calendar.app.created',gmailScope='https://www.googleapis.com/auth/gmail.send';
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const cookie=(request:FastifyRequest,name:string)=>request.headers.cookie?.split(';').map(s=>s.trim()).find(s=>s.startsWith(`${name}=`))?.slice(name.length+1)??'';
 const time=(value:unknown)=>value instanceof Date?value.toISOString():new Date(String(value)).toISOString();
 const html=(value:string)=>value.replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]!));
-type Connection={id:string;therapist_id:string;staff_user_id:string;google_sub:string;email:string;calendar_id:string|null;encrypted_tokens:string|null;generation:string;status:string};
+type Connection={id:string;therapist_id:string;staff_user_id:string;google_sub:string;email:string;calendar_id:string|null;encrypted_tokens:string|null;generation:string;status:string;gmail_send_enabled:boolean;gmail_error_code:string|null;gmail_last_sent_at:Date|string|null};
 type Job={connection_id:string;appointment_id:string;revision:string|number;epoch:number;remote_event_id:string|null;lease_id:string;attempts:number;generation:string;calendar_id:string;therapist_id:string};
 type Options={origin:string;encryptionKey:string;clientId:string;clientSecret:string};
-type NotificationPolicy={key:string;status:'configured'|'permission_required'|'retry_pending';retryAt:number};
 
-/** Event access stays limited to Nexo calendars; CalendarList configures notification settings. */
+/** Event access stays limited to Nexo calendars; Gmail only sends booking notices to the owner. */
 export class GoogleCalendar {
   readonly callbackUrl:string;
   readonly configured:boolean;
   private readonly key:Buffer;
   private readonly api:GoogleApi;
+  private readonly mail:GmailBookings;
   private timer:ReturnType<typeof setTimeout>|undefined;
   private running:Promise<void>|undefined;
   private stopping=false;
   private reconciledAt=0;
-  private readonly notificationPolicies=new Map<string,NotificationPolicy>();
   constructor(private readonly db:Sql,private readonly options:Options){
     this.callbackUrl=new URL(`${base}/callback`,options.origin).toString();
     this.key=createHash('sha256').update('nexo-google-calendar-v1').update(Buffer.from(options.encryptionKey,'base64url')).digest();
     this.configured=Boolean(options.clientId&&options.clientSecret);
     this.api=new GoogleApi(options.clientId,options.clientSecret);
+    this.mail=new GmailBookings(db,this.api,{open:value=>this.open<GoogleTokens>(value),seal:value=>this.seal(value)});
   }
   private seal(value:unknown){const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',this.key,iv);cipher.setAAD(Buffer.from('nexo-calendar'));const body=Buffer.concat([cipher.update(JSON.stringify(value),'utf8'),cipher.final()]);return Buffer.concat([iv,cipher.getAuthTag(),body]).toString('base64url');}
   private open<T>(value:string):T{const bytes=Buffer.from(value,'base64url'),cipher=createDecipheriv('aes-256-gcm',this.key,bytes.subarray(0,12));cipher.setAAD(Buffer.from('nexo-calendar'));cipher.setAuthTag(bytes.subarray(12,28));return JSON.parse(Buffer.concat([cipher.update(bytes.subarray(28)),cipher.final()]).toString('utf8')) as T;}
@@ -44,9 +45,10 @@ export class GoogleCalendar {
       if(!connection)return {eligible:true,configured:this.configured,status:'disconnected'};
       const counts=(await this.db.query(`select count(*) filter(where status in ('pending','processing'))::int as pending,count(*) filter(where status='failed')::int as failed from private.google_calendar_jobs where connection_id=$1`,[connection.id])).rows[0];
       const extra=(await this.db.query('select last_synced_at,error_code from private.google_calendar_connections where id=$1',[connection.id])).rows[0];
-      const policy=this.notificationPolicies.get(connection.id);
-      const emailNotifications=policy?.key===`${connection.generation}:${connection.calendar_id}`?policy.status:'retry_pending';
-      return {eligible:true,configured:this.configured,status:connection.status,email:connection.email,calendarName:'Nexo · Turnos',emailNotifications,lastSyncedAt:extra?.last_synced_at,error:extra?.error_code,pending:counts?.pending??0,failed:counts?.failed??0};
+      const mail=(await this.db.query(`select count(*) filter(where status in ('pending','processing','sending'))::int as pending,count(*) filter(where status='failed')::int as failed,count(*) filter(where status='unknown')::int as unknown from private.gmail_booking_notifications where connection_id=$1`,[connection.id])).rows[0];
+      return {eligible:true,configured:this.configured,status:connection.status,email:connection.email,calendarName:'Nexo · Turnos',
+        gmailEnabled:connection.gmail_send_enabled,gmailError:connection.gmail_error_code,gmailLastSentAt:connection.gmail_last_sent_at,gmailPending:mail?.pending??0,gmailFailed:mail?.failed??0,gmailUnknown:mail?.unknown??0,
+        lastSyncedAt:extra?.last_synced_at,error:extra?.error_code,pending:counts?.pending??0,failed:counts?.failed??0};
     });
     app.post(`${base}/connect`,async(request,reply)=>{
       const user=this.owner(request);if(!this.configured)throw new DomainError('GOOGLE_NOT_CONFIGURED',409);
@@ -59,7 +61,7 @@ export class GoogleCalendar {
       });
       this.browserCookie(reply,browser);
       const url=new URL('https://accounts.google.com/o/oauth2/v2/auth');
-      url.search=new URLSearchParams({client_id:this.options.clientId,redirect_uri:this.callbackUrl,response_type:'code',scope:`openid email ${scope} ${calendarListScope}`,access_type:'offline',prompt:'consent select_account',state,code_challenge:createHash('sha256').update(verifier).digest('base64url'),code_challenge_method:'S256'}).toString();
+      url.search=new URLSearchParams({client_id:this.options.clientId,redirect_uri:this.callbackUrl,response_type:'code',scope:`openid email ${scope} ${gmailScope}`,access_type:'offline',prompt:'consent select_account',state,code_challenge:createHash('sha256').update(verifier).digest('base64url'),code_challenge_method:'S256'}).toString();
       return {url:url.toString()};
     });
     app.get(`${base}/callback`,async(request,reply)=>{
@@ -89,19 +91,20 @@ export class GoogleCalendar {
     app.post(`${base}/sync`,async request=>{
       const connection=await this.current(request);if(!connection||connection.status!=='connected')throw new DomainError('GOOGLE_RECONNECT',409);
       await this.enqueue(connection.id);
+      await this.mail.retry(connection.id);
       return {ok:true};
     });
     app.post(`${base}/disconnect`,async request=>{
       const connection=await this.current(request);if(!connection)return {ok:true};
       await this.db.transaction(async db=>{
-        await db.query("update private.google_calendar_connections set status='disconnected',encrypted_tokens=null,generation=gen_random_uuid(),error_code=null where id=$1",[connection.id]);
+        await db.query("update private.google_calendar_connections set status='disconnected',encrypted_tokens=null,generation=gen_random_uuid(),error_code=null,gmail_send_enabled=false,gmail_error_code=null where id=$1",[connection.id]);
         await db.query('delete from private.google_calendar_oauth where therapist_id=$1',[connection.therapist_id]);
       });
       if(connection.encrypted_tokens){try{await this.api.revoke(this.open<GoogleTokens>(connection.encrypted_tokens).refresh_token);}catch{/* Do not expose cryptographic or provider details. */}}
       return {ok:true};
     });
   }
-  private async link(owner:{staff_user_id:string;therapist_id:string},identity:{sub:string;email:string},tokens:{access_token:string;refresh_token:string|undefined;expires_at:number}){
+  private async link(owner:{staff_user_id:string;therapist_id:string},identity:{sub:string;email:string},tokens:{access_token:string;refresh_token:string|undefined;expires_at:number;scope?:string}){
     const generation=randomUUID();
     const connection=await this.db.transaction(async db=>{
       const therapist=(await db.query(`select t.id from public.therapists t join public.staff_members m on m.user_id=t.staff_user_id where t.id=$1 and m.user_id=$2 and m.active and m.role='therapist' for update of t`,[owner.therapist_id,owner.staff_user_id])).rows[0];
@@ -114,9 +117,9 @@ export class GoogleCalendar {
       let refresh=tokens.refresh_token;
       if(!refresh&&previous?.encrypted_tokens)refresh=this.open<GoogleTokens>(previous.encrypted_tokens).refresh_token;
       if(!refresh)throw new GoogleError('GOOGLE_RECONNECT');
-      return (await db.query<Connection>(`insert into private.google_calendar_connections(therapist_id,staff_user_id,google_sub,email,encrypted_tokens,status,generation)
-        values ($1,$2,$3,$4,$5,'reauth_required',$6) on conflict(therapist_id,google_sub) do update set email=excluded.email,encrypted_tokens=excluded.encrypted_tokens,status='reauth_required',generation=excluded.generation,error_code=null returning *`,
-      [owner.therapist_id,owner.staff_user_id,identity.sub,identity.email,this.seal({...tokens,refresh_token:refresh}),generation])).rows[0]!;
+      return (await db.query<Connection>(`insert into private.google_calendar_connections(therapist_id,staff_user_id,google_sub,email,encrypted_tokens,status,generation,gmail_send_enabled)
+        values ($1,$2,$3,$4,$5,'reauth_required',$6,$7) on conflict(therapist_id,google_sub) do update set email=excluded.email,encrypted_tokens=excluded.encrypted_tokens,status='reauth_required',generation=excluded.generation,error_code=null,gmail_send_enabled=excluded.gmail_send_enabled,gmail_error_code=null returning *`,
+      [owner.therapist_id,owner.staff_user_id,identity.sub,identity.email,this.seal({...tokens,refresh_token:refresh}),generation,tokens.scope?.split(' ').includes(gmailScope)??false])).rows[0]!;
     });
     try{
       let calendarId=connection.calendar_id;
@@ -126,7 +129,6 @@ export class GoogleCalendar {
         const calendar=await this.api.request<{id:string}>(tokens.access_token,'/calendars','POST',{summary:'Nexo · Turnos',description:'Turnos gestionados desde Nexo. Los cambios se realizan en Nexo.',timeZone:clinic.time_zone});
         if(!calendar.id)throw new GoogleError('GOOGLE_TEMPORARY');calendarId=calendar.id;
       }
-      await this.notificationPolicy(connection.id,`${generation}:${calendarId}`,<T>(path:string,method='GET',body?:unknown)=>this.api.request<T>(tokens.access_token,path,method,body),calendarId);
       await this.db.transaction(async db=>{
         const updated=await db.query(`update private.google_calendar_connections c set calendar_id=$2,status='connected',error_code=null where id=$1 and generation=$3
           and exists(select 1 from public.therapists t join public.staff_members s on s.user_id=t.staff_user_id where t.id=c.therapist_id and s.user_id=c.staff_user_id and s.active and s.role='therapist') returning id`,[connection.id,calendarId,generation]);
@@ -134,29 +136,8 @@ export class GoogleCalendar {
         if(calendarId!==connection.calendar_id)await db.query('update private.google_calendar_jobs set remote_event_id=null,epoch=epoch+1 where connection_id=$1',[connection.id]);
       });
       await this.enqueue(connection.id);
+      await this.mail.retry(connection.id);
     }catch(error){await this.db.query("update private.google_calendar_connections set error_code='GOOGLE_RECONNECT' where id=$1 and generation=$2",[connection.id,generation]);throw error;}
-  }
-  private async configureNotifications(call:<T>(path:string,method?:string,body?:unknown)=>Promise<T>,calendarId:string){
-    const path=`/users/me/calendarList/${encodeURIComponent(calendarId)}`;
-    const calendar=await call<{notificationSettings?:{notifications?:{type:string;method:string}[]}}>(path);
-    const notifications=calendar.notificationSettings?.notifications??[];
-    // Keep the therapist's other calendar notifications and reminder preferences.
-    if(!notifications.some(item=>item.type==='eventCreation'&&item.method==='email')){
-      await call(path,'PATCH',{notificationSettings:{notifications:[...notifications,{type:'eventCreation',method:'email'}]}});
-    }
-  }
-  private async notificationPolicy(connectionId:string,key:string,call:<T>(path:string,method?:string,body?:unknown)=>Promise<T>,calendarId:string){
-    const previous=this.notificationPolicies.get(connectionId);
-    if(previous?.key===key&&(previous.status!=='retry_pending'||previous.retryAt>Date.now()))return;
-    try{
-      await this.configureNotifications(call,calendarId);
-      this.notificationPolicies.set(connectionId,{key,status:'configured',retryAt:0});
-    }catch(error){
-      if(error instanceof GoogleError&&error.code==='GOOGLE_CONNECTION_STOPPED')throw error;
-      // CalendarList permissions must never stop event creation, changes or cancellation.
-      const permission=error instanceof GoogleError&&[401,403].includes(error.status)&&error.code!=='GOOGLE_RATE_LIMIT';
-      this.notificationPolicies.set(connectionId,{key,status:permission?'permission_required':'retry_pending',retryAt:Date.now()+60_000});
-    }
   }
   private async enqueue(connectionId:string,manual=true){
     await this.db.query(`insert into private.google_calendar_jobs(connection_id,appointment_id)
@@ -186,7 +167,6 @@ export class GoogleCalendar {
   }
   private async synchronize(job:Job){
     let token=await this.access(job),refreshed=false;
-    const notificationCall=async<T>(path:string,method='GET',body?:unknown)=>{await this.live(job);return this.api.request<T>(token,path,method,body);};
     const call=async<T>(path:string,method='GET',body?:unknown):Promise<T>=>{
       await this.live(job);
       try{return await this.api.request<T>(token,path,method,body);}
@@ -196,8 +176,6 @@ export class GoogleCalendar {
         return this.api.request<T>(token,path,method,body);
       }
     };
-    const policy=`${job.generation}:${job.calendar_id}`;
-    await this.notificationPolicy(job.connection_id,policy,notificationCall,job.calendar_id);
     const appointment=(await this.db.query<{status:string;therapist_id:string;starts_at:Date|string;ends_at:Date|string;patient_name:string;phone:string|null;insurance:string|null;reported_reason:string|null;additional_info:string|null;therapist_name:string;time_zone:string}>(`select a.status,a.therapist_id,a.starts_at,a.ends_at,p.name as patient_name,p.phone,p.insurance,p.reported_reason,p.additional_info,t.name as therapist_name,c.time_zone
       from public.appointments a join public.patients p on p.id=a.patient_id join public.therapists t on t.id=a.therapist_id cross join public.clinics c where a.id=$1`,[job.appointment_id])).rows[0];
     const confirmed=appointment?.status==='confirmed'&&appointment.therapist_id===job.therapist_id;
@@ -272,6 +250,7 @@ export class GoogleCalendar {
   }
   start(){
     if(!this.configured)return;
+    this.mail.start();
     const tick=async()=>{
       if(this.stopping)return;
       this.running=(async()=>{
@@ -287,5 +266,5 @@ export class GoogleCalendar {
     };
     this.timer=setTimeout(()=>void tick(),1000);this.timer.unref();
   }
-  async stop(){this.stopping=true;clearTimeout(this.timer);await this.running?.catch(()=>{});}
+  async stop(){this.stopping=true;clearTimeout(this.timer);await Promise.all([this.running?.catch(()=>{}),this.mail.stop()]);}
 }
