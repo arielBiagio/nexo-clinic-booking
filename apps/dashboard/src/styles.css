@@ -85,7 +85,7 @@
 .preference-note{font-size:12.5px;color:var(--text-secondary,#71837b);line-height:1.6;margin:0}
 .preference-sound{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding-left:31px}
 .preference-sound>span{font-size:12.5px;color:var(--text-secondary,#71837b);line-height:1.5;flex:1;min-width:150px}
-.preferences-account{border-top:1px solid var(--border);padding-top:20px}
+.preferences-account{padding-top:0}
 @media(min-width:1051px){.agenda-rail{top:84px;max-height:calc(100dvh - 100px)}}
 
 /* Use the breadcrumb as the visible section heading. */
@@ -171,7 +171,18 @@
 .main-shell>main>.loading-placeholder--form,.main-shell>main>.loading-placeholder--schedule{padding:24px;background:var(--surface,#fff);border:1px solid var(--border);border-radius:10px}
 .activity-popover>.loading-placeholder{padding:0 16px 12px}
 @keyframes placeholderPulse{0%,100%{opacity:1}50%{opacity:.62}}
-.calendar-connect-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.calendar-connect-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:8px}
+.settings-action{display:flex;align-items:center;gap:10px;min-width:0;min-height:48px;padding:9px 13px;border:1px solid transparent;border-radius:13px;background:var(--surface-soft,#f3f6f5);color:var(--text-primary,#25322f);font-size:13px;font-weight:600;text-align:left;line-height:1.35;transition:background .14s,transform .14s}
+.settings-action-icon{display:grid;place-items:center;width:30px;height:30px;flex-shrink:0;border-radius:10px;background:color-mix(in srgb,currentColor 7%,transparent);color:var(--green)}
+.settings-action-main{grid-column:1/-1;background:color-mix(in srgb,var(--green) 13%,var(--surface-soft,#f3f6f5));color:var(--green)}
+.settings-action-danger{color:var(--text-secondary,#71837b)}
+.settings-action-danger .settings-action-icon{color:var(--text-secondary,#71837b)}
+.settings-action:hover:not(:disabled){background:color-mix(in srgb,var(--green) 9%,var(--surface-soft,#f3f6f5));transform:translateY(-1px)}
+.settings-action-danger:hover:not(:disabled),.settings-logout:hover{color:#c57465;background:color-mix(in srgb,#c57465 10%,var(--surface-soft,#f3f6f5))}
+.settings-action:active:not(:disabled){transform:translateY(0)}
+.settings-logout{width:100%;justify-content:center;background:transparent;color:var(--text-secondary,#71837b)}
+.settings-logout .settings-action-icon{color:inherit;background:transparent}
+@media(max-width:420px){.calendar-connect-actions{grid-template-columns:minmax(0,1fr)}}
 .calendar-account{margin-top:12px;overflow-wrap:anywhere;font-weight:600}
 .calendar-sync-status{display:grid;gap:6px;margin-top:10px;color:var(--text-secondary,var(--muted));font-size:13px}
 .calendar-disconnect{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px;padding:14px;border:1px solid var(--border);border-radius:10px}

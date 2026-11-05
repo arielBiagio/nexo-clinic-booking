@@ -2,6 +2,28 @@ import { Temporal } from '@js-temporal/polyfill';
 
 const weekdays=['lunes','martes','miercoles','jueves','viernes','sabado','domingo'] as const;
 const normalize=(text:string)=>text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+const months=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+
+/** A numbered weekday is a single constraint: never drop its day number. */
+export function numberedWeekdayDate(text:string,now:string,timeZone:string):{date:string|null;needsClarification:boolean} {
+  const value=normalize(text);
+  if(/\b(cada|todos|todas|toda)\b/.test(value))return {date:null,needsClarification:false};
+  const matches=[...value.matchAll(/\b(lunes|martes|miercoles|jueves|viernes|sabado|domingo)(?:\s*,\s*|\s+)(?:proximo\s+)?(?:dia\s+)?(\d{1,2})\b(?![\d/:-]|\.\d)/g)];
+  if(!matches.length)return {date:null,needsClarification:false};
+  if(matches.length!==1)return {date:null,needsClarification:true};
+  const match=matches[0]!,weekday=weekdays.indexOf(match[1] as typeof weekdays[number])+1,day=Number(match[2]);
+  const suffix=value.slice(match.index!+match[0].length);
+  if(/^\s*(?:h(?:s|oras?)?|a\.?m\.?|p\.?m\.?)(?!\w)/.test(suffix))return {date:null,needsClarification:false};
+  const monthText=suffix.match(/^\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)(?:\s+(?:de(?:l)?\s+)?(\d{4}))?\b/);
+  if(day<1||day>31||/^\s+de\s+/.test(suffix)&&!monthText)return {date:null,needsClarification:true};
+  const month=monthText?months.indexOf(monthText[1]!)+1:null,year=monthText?.[2]?Number(monthText[2]):null;
+  const today=Temporal.Instant.from(now).toZonedDateTimeISO(timeZone).toPlainDate(),candidates:string[]=[];
+  for(let offset=0;offset<42;offset++){
+    const date=today.add({days:offset});
+    if(date.day===day&&date.dayOfWeek===weekday&&(!month||date.month===month)&&(!year||date.year===year))candidates.push(date.toString());
+  }
+  return candidates.length===1?{date:candidates[0]!,needsClarification:false}:{date:null,needsClarification:true};
+}
 
 export function calendarHints(now:string,timeZone:string) {
   const today=Temporal.Instant.from(now).toZonedDateTimeISO(timeZone).toPlainDate();
@@ -19,6 +41,8 @@ export function requestedLocalDate(text:string,now:string,timeZone:string):strin
   if(/^no\b/.test(value))return null;
   const iso=value.match(/\b(\d{4}-\d{2}-\d{2})\b/);
   if(iso){try{return Temporal.PlainDate.from(iso[1]!).toString();}catch{return null;}}
+  const numbered=numberedWeekdayDate(text,now,timeZone);
+  if(numbered.date||numbered.needsClarification)return numbered.date;
   // Written explicit dates remain the model's job; do not replace them with a weekday guess.
   if(/\b\d{1,2}\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/.test(value))return null;
   const dateText=value.replace(/\b(?:por|a|en|durante|para) la manana\b|\b(?:por|a|en|durante|para) las mananas\b|\bhorario (?:de manana|matutino)\b/g,'');

@@ -3,9 +3,9 @@ import { Temporal } from '@js-temporal/polyfill';
 import { ClinicRepository, DomainError } from '../../../packages/db/src/repository.js';
 import { withSavepoints } from '../../../packages/db/src/savepoints.js';
 import { isExplicitConfirmation, ProviderError, type AvailabilityInput, type IntentModel, type OfferedSlot } from '../../../packages/agent/src/openrouter.js';
-import { normalizeAvailabilitySearch, simpleAvailabilitySearch, requestedLocalTime, offeredSelection, rejectsSelectedSlot,isCancellationRequest,isCancellationConfirmation,isRescheduleRequest,requestsWholeCancellationWeek } from '../../../packages/agent/src/search.js';
+import { normalizeAvailabilitySearch, simpleAvailabilitySearch, isAvailabilityRequest, requestedLocalTime, offeredSelection, rejectsSelectedSlot,isCancellationRequest,isCancellationConfirmation,isRescheduleRequest,requestsWholeCancellationWeek } from '../../../packages/agent/src/search.js';
 import { aiLimits } from '../../../packages/agent/src/limits.js';
-import { requestedLocalDate } from '../../../packages/agent/src/calendar.js';
+import { requestedLocalDate,numberedWeekdayDate } from '../../../packages/agent/src/calendar.js';
 import { renderNarration, type NarrationContext } from '../../../packages/agent/src/narration.js';
 import { groundedPatientPatch, missingContact, explicitPatientInfo,type PatientDetails } from '../../../packages/core/src/patient.js';
 import { isWeeklyConfirmation,normalizeWeeklyText,type WeeklyInput } from '../../../packages/agent/src/weekly.js';
@@ -372,12 +372,21 @@ export class DemoService {
         if(session.selected&&isExplicitConfirmation(input.text))action='confirm';
         else {
           try{
-            if(session.modelRequests>=aiLimits.conversationPerHour)throw new ProviderError('CONVERSATION_LIMIT');
-            session.modelRequests++;
             const clinic=(await this.repository.db.query<{name:string;time_zone:string}>('select name,time_zone from public.clinics')).rows[0]!;
             const therapists=(await this.repository.getTherapists()).map(t=>({id:String(t.id),name:String(t.name),specialty:String(t.specialty)}));
             const localNow=Temporal.Now.zonedDateTimeISO(clinic.time_zone).toString();
-            const decision=await this.intentModel.decide({now:localNow,timeZone:clinic.time_zone,clinicName:clinic.name,therapists,
+            if(!session.weekly&&isAvailabilityRequest(input.text,therapists,session.search)&&numberedWeekdayDate(input.text,localNow,clinic.time_zone).needsClarification){
+              session.selected=null;
+              await this.repository.db.query("update public.conversations set pending_slot_id=null,pending_expires_at=null where id=$1 and status='active'",[id]);
+              this.add(session,'assistant','¿Me confirmás el día y el mes? Necesito hacer coincidir la fecha con el día de la semana para buscar el turno correcto.');
+              session.choices=[{label:'Buscar horarios',action:'start'},{label:'Hablar con recepción',action:'human'}];session.processed.add(input.messageId);return this.get(id);
+            }
+            const directSearch=!session.weekly&&!session.rescheduling?simpleAvailabilitySearch(input.text,localNow,clinic.time_zone,therapists,session.search):null;
+            if(!directSearch){
+              if(session.modelRequests>=aiLimits.conversationPerHour)throw new ProviderError('CONVERSATION_LIMIT');
+              session.modelRequests++;
+            }
+            const decision=directSearch?{kind:'availability' as const,filter:directSearch}:await this.intentModel.decide({now:localNow,timeZone:clinic.time_zone,clinicName:clinic.name,therapists,
               patient:{name:current.patient.name_collected?current.patient.name:null,phone:current.patient.phone,insurance:current.patient.insurance,summary:current.patient.intake_summary,missing:missingContact(current.patient)},hasAppointment:current.hasAppointment,appointments:current.appointments,rescheduling:session.rescheduling,search:session.search,weeklyRequest:session.weekly?.request??null,
               offered:session.offered,selectedSlotId:session.selected,history:session.messages.map(m=>({role:m.role,text:m.text}))});
             session.providerError=null;

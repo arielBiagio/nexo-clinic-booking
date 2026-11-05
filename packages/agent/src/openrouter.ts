@@ -201,6 +201,7 @@ Contexto actual (JSON del backend): ${JSON.stringify({now:context.now,timeZone:c
         call=updates[0];
       }
       if(!call){
+        if(searching||moving||cancelling||weekly)throw new Error('Expected scheduling tool');
         const text=value.content?.trim();
         if(!text||text.length>800)throw new Error('Invalid text');
         return {kind:'reply',text};

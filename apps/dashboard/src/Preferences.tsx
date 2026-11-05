@@ -20,7 +20,6 @@ export function Preferences({settings,appearance,canLogout,onLogout,calendarResu
     </section>
     <GoogleCalendarSettings staffMode={canLogout} result={calendarResult}/>
     {settings.error&&<p className="form-error" role="status">{settings.error}</p>}
-    <p className="preference-note">La apariencia y los avisos se guardan para tu usuario en este navegador. Los avisos funcionan mientras el panel está abierto.</p>
-    {canLogout&&<div className="preferences-account"><button className="secondary-button full" onClick={onLogout}><LogOut size={17}/>Cerrar sesión</button></div>}
+    {canLogout&&<div className="preferences-account"><button className="settings-action settings-logout" onClick={onLogout}><span className="settings-action-icon"><LogOut size={18}/></span><span>Cerrar sesión</span></button></div>}
   </div>;
 }

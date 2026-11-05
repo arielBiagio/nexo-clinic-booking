@@ -33,6 +33,8 @@ ${JSON.stringify({event:context.event,facts,variables:context.variables,required
 /** Dates, times and names are inserted by the backend after drafting. */
 export function renderNarration(draft:string,context:NarrationContext):string|null {
   const text=draft.trim();
+  const normalize=(value:string)=>value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+  if(normalize(text)===normalize(context.request))return null;
   if(!text||text.length>600||/[\d<>]|https?:|www\.|\[[^\]]*\]\(/i.test(text))return null;
   const tokens=[...text.matchAll(/\{([a-z_]+)\}/g)].map(match=>match[1]!);
   if(tokens.some(key=>!Object.hasOwn(context.variables,key)))return null;
