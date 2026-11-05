@@ -3,7 +3,8 @@ import { Temporal } from '@js-temporal/polyfill';
 import { ClinicRepository, DomainError } from '../../../packages/db/src/repository.js';
 import { withSavepoints } from '../../../packages/db/src/savepoints.js';
 import { isExplicitConfirmation, ProviderError, type AvailabilityInput, type IntentModel, type OfferedSlot } from '../../../packages/agent/src/openrouter.js';
-import { normalizeAvailabilitySearch, requestedLocalTime, offeredSelection, rejectsSelectedSlot,isCancellationRequest,isCancellationConfirmation,isRescheduleRequest,requestsWholeCancellationWeek } from '../../../packages/agent/src/search.js';
+import { normalizeAvailabilitySearch, simpleAvailabilitySearch, requestedLocalTime, offeredSelection, rejectsSelectedSlot,isCancellationRequest,isCancellationConfirmation,isRescheduleRequest,requestsWholeCancellationWeek } from '../../../packages/agent/src/search.js';
+import { aiLimits } from '../../../packages/agent/src/limits.js';
 import { requestedLocalDate } from '../../../packages/agent/src/calendar.js';
 import { renderNarration, type NarrationContext } from '../../../packages/agent/src/narration.js';
 import { groundedPatientPatch, missingContact, explicitPatientInfo,type PatientDetails } from '../../../packages/core/src/patient.js';
@@ -37,7 +38,7 @@ export class DemoService {
       'select id,role,body,created_at from public.messages where conversation_id=$1 and body is not null order by sequence',[id])).rows.map(row=>({id:row.id,role:row.role,text:row.body,at:new Date(row.created_at).toISOString()}));
     const session:Session={messages,choices:stored?.choices??[{label:'Buscar horarios',action:'start'},{label:'Hablar con recepción',action:'human'}],
       selected:pending,processed:new Set(stored?.processed??[]),offered:stored?.offered??[],modelRequests:expired?0:stored?.modelRequests??0,modelWindowStart:expired?Date.now():windowStart,
-      clarificationCount:stored?.clarificationCount??0,providerError:expired&&stored?.providerError==='RATE_LIMIT'?null:stored?.providerError??null,search:stored?.search??null,rescheduling:stored?.rescheduling??null,cancellation:stored?.cancellation??null,weekly:stored?.weekly??null};
+      clarificationCount:stored?.clarificationCount??0,providerError:expired&&['RATE_LIMIT','LOCAL_RATE_LIMIT','CONVERSATION_LIMIT'].includes(stored?.providerError??'')?null:stored?.providerError??null,search:stored?.search??null,rescheduling:stored?.rescheduling??null,cancellation:stored?.cancellation??null,weekly:stored?.weekly??null};
     for(const [key,value] of stored?.inputs??[])this.inputs.set(key,value);
     this.sessions.set(id,session);
     return session;
@@ -89,7 +90,7 @@ export class DemoService {
   }
   private async narrate(session:Session,index:number,context:NarrationContext,verifiedSuffix='') {
     const message=session.messages[index];
-    if(!this.intentModel?.explain||session.modelRequests>=20||message?.role!=='assistant')return;
+    if(!this.intentModel?.explain||session.modelRequests>=aiLimits.conversationPerHour||['RATE_LIMIT','LOCAL_RATE_LIMIT','CONVERSATION_LIMIT'].includes(session.providerError??'')||message?.role!=='assistant')return;
     session.modelRequests++;
     try{
       const draft=await this.intentModel.explain(context);
@@ -371,7 +372,7 @@ export class DemoService {
         if(session.selected&&isExplicitConfirmation(input.text))action='confirm';
         else {
           try{
-            if(session.modelRequests>=20)throw new ProviderError('RATE_LIMIT');
+            if(session.modelRequests>=aiLimits.conversationPerHour)throw new ProviderError('CONVERSATION_LIMIT');
             session.modelRequests++;
             const clinic=(await this.repository.db.query<{name:string;time_zone:string}>('select name,time_zone from public.clinics')).rows[0]!;
             const therapists=(await this.repository.getTherapists()).map(t=>({id:String(t.id),name:String(t.name),specialty:String(t.specialty)}));
@@ -453,22 +454,30 @@ export class DemoService {
               session.processed.add(input.messageId);return this.get(id);
             }
           }catch(error){
-            if(error instanceof ProviderError&&error.code==='RATE_LIMIT'){
-              session.providerError='RATE_LIMIT';
-              this.add(session,'assistant','Se alcanzó un límite temporal de consultas a la IA. Podés seguir con los botones para buscar horarios, cambiar o cancelar una reserva.');
-              session.choices=[{label:'Buscar horarios',action:'start'},...(current.appointments.length?[{label:'Cambiar un turno',action:'reschedule'} as DemoChoice,{label:'Cancelar un turno',action:'cancel'} as DemoChoice]:[]),{label:'Hablar con recepción',action:'human'}];
-              session.processed.add(input.messageId);return this.get(id);
-            }
-            if(error instanceof ProviderError&&error.code==='INVALID_RESPONSE'){
+            if(error instanceof ProviderError&&['RATE_LIMIT','LOCAL_RATE_LIMIT','CONVERSATION_LIMIT'].includes(error.code)){
+              session.providerError=error.code;
+              const clinic=(await this.repository.db.query<{time_zone:string}>('select time_zone from public.clinics')).rows[0]!;
+              const therapists=(await this.repository.getTherapists()).map(t=>({id:String(t.id),name:String(t.name),specialty:String(t.specialty)}));
+              const fallback=!session.weekly?simpleAvailabilitySearch(input.text,Temporal.Now.zonedDateTimeISO(clinic.time_zone).toString(),clinic.time_zone,therapists,session.search):null;
+              if(fallback){action='start';filter=fallback;session.clarificationCount=0;}
+              else{
+                const wait=Math.max(1,Math.ceil((session.modelWindowStart+3_600_000-Date.now())/60_000));
+                const reason=error.code==='CONVERSATION_LIMIT'?`Esta conversación alcanzó el límite de consultas a la IA configurado en Nexo. Se renueva en aproximadamente ${wait} minutos.`:error.code==='LOCAL_RATE_LIMIT'?'Nexo alcanzó su límite horario de consultas a la IA.':'OpenRouter está limitando temporalmente las consultas a la IA.';
+                this.add(session,'assistant',`${reason} Podés seguir con los botones para buscar horarios, cambiar o cancelar una reserva.`);
+                session.choices=[{label:'Buscar horarios',action:'start'},...(current.appointments.length?[{label:'Cambiar un turno',action:'reschedule'} as DemoChoice,{label:'Cancelar un turno',action:'cancel'} as DemoChoice]:[]),{label:'Hablar con recepción',action:'human'}];
+                session.processed.add(input.messageId);return this.get(id);
+              }
+            }else if(error instanceof ProviderError&&error.code==='INVALID_RESPONSE'){
               session.providerError=null;
               this.add(session,'assistant','No pude interpretar bien esa respuesta. ¿Qué día o franja horaria te conviene? También podés consultar los próximos horarios con el botón.');
               session.choices=[{label:'Buscar horarios',action:'start'},{label:'Hablar con recepción',action:'human'}];
               session.processed.add(input.messageId);return this.get(id);
+            }else{
+              session.providerError=error instanceof ProviderError?error.code:'UNAVAILABLE';
+              await this.repository.escalate(id,'tool_failure');
+              this.add(session,'assistant','El asistente de IA no está disponible ahora. Le paso tu conversación a recepción para que puedan ayudarte.');
+              session.choices=[];session.processed.add(input.messageId);return this.get(id);
             }
-            session.providerError=error instanceof ProviderError?error.code:'UNAVAILABLE';
-            await this.repository.escalate(id,'tool_failure');
-            this.add(session,'assistant','El asistente de IA no está disponible ahora. Le paso tu conversación a recepción para que puedan ayudarte.');
-            session.choices=[];session.processed.add(input.messageId);return this.get(id);
           }
         }
       }else if(!input.action&&session.selected&&isExplicitConfirmation(text))action='confirm';

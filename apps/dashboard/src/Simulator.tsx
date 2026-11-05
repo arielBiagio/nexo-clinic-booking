@@ -11,7 +11,7 @@ export function Simulator({chat,setChat,onChange,onInbox,onDelete}:{chat:Chat|nu
   const id=chat?.id;
   const usesAI=chat?.ai?.provider==='openrouter';
   const modelLabel=chat?.ai?.model==='openai/gpt-6-luna'?'GPT-6 Luna':chat?.ai?.model==='openai/gpt-4o-mini'?'GPT-4o mini':chat?.ai?.model;
-  const connectionIssue:Record<string,string>={CONFIGURATION:'OpenRouter rechazó los parámetros del modelo.',AUTH:'OpenRouter no aceptó la clave configurada.',BUDGET:'OpenRouter informó un límite de saldo o presupuesto.',RATE_LIMIT:'Se alcanzó un límite de consultas. Probá más tarde.',INVALID_RESPONSE:'No pudimos procesar la respuesta de OpenRouter.',UNAVAILABLE:'No pudimos conectar con OpenRouter.'};
+  const connectionIssue:Record<string,string>={CONFIGURATION:'OpenRouter rechazó los parámetros del modelo.',AUTH:'OpenRouter no aceptó la clave configurada.',BUDGET:'OpenRouter informó un límite de saldo o presupuesto.',RATE_LIMIT:'OpenRouter está limitando temporalmente las consultas.',LOCAL_RATE_LIMIT:'Se alcanzó el límite horario de consultas configurado en Nexo.',CONVERSATION_LIMIT:'Esta conversación alcanzó el límite horario de consultas configurado en Nexo.',INVALID_RESPONSE:'No pudimos procesar la respuesta de OpenRouter.',UNAVAILABLE:'No pudimos conectar con OpenRouter.'};
   useEffect(()=>{bottom.current?.scrollIntoView({behavior:'smooth',block:'end'});},[chat?.messages.length]);
   useEffect(()=>{if(!id)return;let active=true;const timer=setInterval(()=>{api<Chat>(`/demo/conversations/${id}`).then(next=>{if(active)setChat(next);}).catch(()=>{});},3500);return()=>{active=false;clearInterval(timer);};},[id,setChat]);
   const send=async(choice?:Choice)=>{

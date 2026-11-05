@@ -4,6 +4,7 @@ import { isAvailabilityRequest,isRescheduleRequest,isCancellationRequest } from 
 import { bookingGuidelines } from './booking-prompt.js';
 import { narrationPrompt, type NarrationContext } from './narration.js';
 import { isWeeklyBookingRequest,weeklyInput,type WeeklyInput } from './weekly.js';
+import { aiLimits } from './limits.js';
 
 export const handoffReason = z.enum(['requested_human','not_understood','clinical','billing','exception','tool_failure']);
 export const availabilityInput = z.strictObject({
@@ -46,7 +47,7 @@ export interface IntentModel {
 }
 
 export class ProviderError extends Error {
-  constructor(readonly code:'UNAVAILABLE'|'AUTH'|'BUDGET'|'RATE_LIMIT'|'INVALID_RESPONSE'|'CONFIGURATION') { super(`OPENROUTER_${code}`); }
+  constructor(readonly code:'UNAVAILABLE'|'AUTH'|'BUDGET'|'RATE_LIMIT'|'LOCAL_RATE_LIMIT'|'CONVERSATION_LIMIT'|'INVALID_RESPONSE'|'CONFIGURATION') { super(`OPENROUTER_${code}`); }
 }
 
 const definitions = [
@@ -90,7 +91,7 @@ export class OpenRouterModel implements IntentModel {
     this.model=options.model??'openai/gpt-6-luna';
     this.transport=options.fetch??fetch;
     this.timeoutMs=options.timeoutMs??10_000;
-    this.maxRequests=options.maxRequestsPerHour??60;
+    this.maxRequests=options.maxRequestsPerHour??aiLimits.processPerHour;
   }
   private readonly transport:typeof fetch;
   private readonly timeoutMs:number;
@@ -103,7 +104,7 @@ export class OpenRouterModel implements IntentModel {
 
   private reserveRequest() {
     if(Date.now()-this.windowStart>=3_600_000){this.windowStart=Date.now();this.requests=0;}
-    if(this.requests>=this.maxRequests)throw new ProviderError('RATE_LIMIT');
+    if(this.requests>=this.maxRequests)throw new ProviderError('LOCAL_RATE_LIMIT');
     this.requests++;
   }
 
