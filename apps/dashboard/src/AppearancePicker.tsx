@@ -1,3 +1,4 @@
+import { t, useLanguage } from './i18n';
 import type { CSSProperties } from 'react';
 import { Check, Palette } from 'lucide-react';
 import type { AppearanceSettings } from './useTheme';
@@ -8,15 +9,16 @@ const modes=[
 ] as const;
 
 export function AppearancePicker({appearance}:{appearance:AppearanceSettings}){
+  useLanguage();
   return <section className="preference-group appearance-picker" aria-labelledby="appearance-heading">
-    <div className="appearance-heading"><Palette size={19}/><h3 id="appearance-heading">Apariencia</h3></div>
-    <p className="preference-note">Elegí entre modo claro y oscuro.</p>
-    <div className="palette-options" aria-label="Modo de color">{modes.map(palette=>{
+    <div className="appearance-heading"><Palette size={19}/><h3 id="appearance-heading">{t("Apariencia")}</h3></div>
+    <p className="preference-note">{t("Elegí entre modo claro y oscuro.")}</p>
+    <div className="palette-options" aria-label={t("Modo de color")}>{modes.map(palette=>{
       const active=appearance.theme===palette.theme;
       const style={'--preview-bg':palette.background,'--preview-surface':palette.surface,'--preview-accent':palette.accent,'--preview-soft':palette.soft} as CSSProperties;
-      return <button key={palette.theme} className={`palette-option${active?' selected':''}`} style={style} aria-pressed={active} aria-label={`${palette.name}: ${palette.description}`} onClick={()=>appearance.setTheme(palette.theme)}>
+      return <button key={palette.theme} className={`palette-option${active?' selected':''}`} style={style} aria-pressed={active} aria-label={`${t(palette.name)}: ${t(palette.description)}`} onClick={()=>appearance.setTheme(palette.theme)}>
         <span className="palette-preview" aria-hidden="true"><span className="palette-preview-rail"><i/><i/><i/></span><span className="palette-preview-main"><span className="palette-preview-header"><i/><b/></span><span className="palette-preview-stats"><i/><i/><i/></span><span className="palette-preview-agenda"><i/><i/><i/></span></span>{active&&<span className="palette-selected"><Check size={13}/></span>}</span>
-        <strong>{palette.name}</strong><small>{palette.description}</small>
+        <strong>{t(palette.name)}</strong><small>{t(palette.description)}</small>
       </button>;
     })}</div>
   </section>;

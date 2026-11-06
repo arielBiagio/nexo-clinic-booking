@@ -1,3 +1,4 @@
+import { t, useLanguage } from './i18n';
 import { LoadingPlaceholder } from './LoadingPlaceholder';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowUp, Bot, CheckCheck, Headphones, MessageSquare, Sparkles, Trash2 } from 'lucide-react';
@@ -6,6 +7,7 @@ import { api, initials } from './api';
 import { PatientCard } from './PatientCard';
 
 export function Inbox({data,selected,onSelect,onRefresh,notify,onDelete,onRemoved,unread,onRead}:{data:Dashboard;selected:string|null;onSelect:(id:string)=>void;onRefresh:()=>void;notify:(s:string)=>void;onDelete:(id:string)=>Promise<void>;onRemoved:()=>void;unread:Record<string,number>;onRead:()=>Promise<void>}) {
+  useLanguage();
   const [tab,setTab]=useState<'pending'|'all'>(()=>selected&&data.conversations.some(c=>c.id===selected&&!c.handoff_id&&c.status!=='human_led')?'all':'pending'),[chat,setChat]=useState<Chat|null>(null),[text,setText]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const [mobileDetailOpen,setMobileDetailOpen]=useState(Boolean(selected));
   const messages=useRef<HTMLDivElement>(null),textarea=useRef<HTMLTextAreaElement>(null),followLatest=useRef(true),lastConversation=useRef<string|null>(null);
@@ -46,40 +48,40 @@ export function Inbox({data,selected,onSelect,onRefresh,notify,onDelete,onRemove
     };
     resize();window.addEventListener('resize',resize);return()=>window.removeEventListener('resize',resize);
   },[text,chat?.id,mobileDetailOpen]);
-  const reply=async()=>{if(!chat||!text.trim()||busy)return;setBusy(true);setError('');try{followLatest.current=true;setChat(await api<Chat>(`/demo/conversations/${chat.id}/reply`,{messageId:crypto.randomUUID(),text:text.trim()}));drafts.current.delete(chat.id);setText('');onRefresh();notify('Respuesta guardada. Si usa Telegram, se enviará a su chat.');}catch(e){setError((e as Error).message);}finally{setBusy(false);}};
-  const resolve=async()=>{if(!chat||busy)return;setBusy(true);setError('');try{await api(`/demo/conversations/${chat.id}/resolve`,{mode:'active'});setChat(await api<Chat>(`/demo/conversations/${chat.id}`));onRefresh();notify('Caso resuelto. El asistente puede continuar.');}catch(e){setError((e as Error).message);}finally{setBusy(false);}};
+  const reply=async()=>{if(!chat||!text.trim()||busy)return;setBusy(true);setError('');try{followLatest.current=true;setChat(await api<Chat>(`/demo/conversations/${chat.id}/reply`,{messageId:crypto.randomUUID(),text:text.trim()}));drafts.current.delete(chat.id);setText('');onRefresh();notify(t("Respuesta guardada. Si usa Telegram, se enviará a su chat."));}catch(e){setError((e as Error).message);}finally{setBusy(false);}};
+  const resolve=async()=>{if(!chat||busy)return;setBusy(true);setError('');try{await api(`/demo/conversations/${chat.id}/resolve`,{mode:'active'});setChat(await api<Chat>(`/demo/conversations/${chat.id}`));onRefresh();notify(t("Caso resuelto. El asistente puede continuar."));}catch(e){setError((e as Error).message);}finally{setBusy(false);}};
   const remove=async()=>{if(!chat||busy)return;setBusy(true);setError('');try{await onDelete(chat.id);setMobileDetailOpen(false);}catch(e){setError((e as Error).message);}finally{setBusy(false);}};
-  return <section className={`inbox panel ${mobileDetailOpen?'show-conversation':''}`} aria-label="Conversaciones de recepción">
+  return <section className={`inbox panel ${mobileDetailOpen?'show-conversation':''}`} aria-label={t("Conversaciones de recepción")}>
     <div className="inbox-list">
-      <div className="inbox-list-heading"><h2>Bandeja de recepción</h2><span className="count-badge">{data.conversations.filter(c=>c.handoff_id||c.status==='human_led').length}</span></div>
-      <div className="inbox-tabs"><button className={tab==='pending'?'active':''} onClick={()=>{setTab('pending');const first=data.conversations.find(c=>c.handoff_id||c.status==='human_led');if(first)onSelect(first.id);}}>Por atender</button><button className={tab==='all'?'active':''} onClick={()=>setTab('all')}>Todas</button></div>
+      <div className="inbox-list-heading"><h2>{t("Bandeja de recepción")}</h2><span className="count-badge">{data.conversations.filter(c=>c.handoff_id||c.status==='human_led').length}</span></div>
+      <div className="inbox-tabs"><button className={tab==='pending'?'active':''} onClick={()=>{setTab('pending');const first=data.conversations.find(c=>c.handoff_id||c.status==='human_led');if(first)onSelect(first.id);}}>{t("Por atender")}</button><button className={tab==='all'?'active':''} onClick={()=>setTab('all')}>{t("Todas")}</button></div>
       <div className="inbox-cases">
-        {!cases.length&&<div className="empty-inbox"><CheckCheck size={28}/><strong>Todo al día</strong><p>No hay conversaciones esperando.</p></div>}
-        {cases.map(c=><button key={c.id} disabled={busy} className={`conversation-item ${current===c.id?'selected':''}`} onClick={()=>{onSelect(c.id);setMobileDetailOpen(true);}}><span className="patient-avatar">{initials(c.patient_name)}</span><div><strong>{c.patient_name}</strong><p>{c.preview}</p><span>{c.handoff_id?'Necesita recepción':c.status==='human_led'?'Atención humana':'Asistente'}</span></div>{(unread[c.id]??0)>0?<span className="count-badge" aria-label={`${unread[c.id]} sin leer`}>{unread[c.id]}</span>:null}</button>)}
+        {!cases.length&&<div className="empty-inbox"><CheckCheck size={28}/><strong>{t("Todo al día")}</strong><p>{t("No hay conversaciones esperando.")}</p></div>}
+        {cases.map(c=><button key={c.id} disabled={busy} className={`conversation-item ${current===c.id?'selected':''}`} onClick={()=>{onSelect(c.id);setMobileDetailOpen(true);}}><span className="patient-avatar">{initials(c.patient_name)}</span><div><strong>{c.patient_name}</strong><p>{c.preview}</p><span>{c.handoff_id?t("Necesita recepción"):c.status==='human_led'?t("Atención humana"):t("Asistente")}</span></div>{(unread[c.id]??0)>0?<span className="count-badge" aria-label={t("{0} sin leer", [unread[c.id]])}>{unread[c.id]}</span>:null}</button>)}
       </div>
-      <button className="removed-link" onClick={onRemoved}>Ver conversaciones eliminadas</button>
+      <button className="removed-link" onClick={onRemoved}>{t("Ver conversaciones eliminadas")}</button>
     </div>
     <div className="inbox-detail">{chat?<>
       <div className="inbox-context">
         <div className="inbox-person">
-          <button className="icon-button inbox-back" aria-label="Volver a conversaciones" onClick={()=>setMobileDetailOpen(false)}><ArrowLeft size={19}/></button>
+          <button className="icon-button inbox-back" aria-label={t("Volver a conversaciones")} onClick={()=>setMobileDetailOpen(false)}><ArrowLeft size={19}/></button>
           <div className="patient-avatar large">{initials(chat.name)}</div>
-          <div className="inbox-person-info"><h2 title={chat.name}>{chat.name}</h2><span>Paciente de prueba</span></div>
-          <span className={`status-pill ${chat.status==='active'?'green':'amber'}`}>{chat.status==='active'?<Bot size={13}/>:<Headphones size={13}/>} {chat.status==='active'?'Asistente activo':'Atención humana'}</span>
-          <button type="button" className="icon-button danger-icon" aria-label="Eliminar conversación" title="Eliminar conversación; sus turnos se conservan" disabled={busy} onClick={()=>void remove()}><Trash2 size={17}/></button>
+          <div className="inbox-person-info"><h2 title={chat.name}>{chat.name}</h2><span>{t("Paciente de prueba")}</span></div>
+          <span className={`status-pill ${chat.status==='active'?'green':'amber'}`}>{chat.status==='active'?<Bot size={13}/>:<Headphones size={13}/>} {chat.status==='active'?t("Asistente activo"):t("Atención humana")}</span>
+          <button type="button" className="icon-button danger-icon" aria-label={t("Eliminar conversación")} title={t("Eliminar conversación; sus turnos se conservan")} disabled={busy} onClick={()=>void remove()}><Trash2 size={17}/></button>
         </div>
         <PatientCard key={chat.id} conversationId={chat.id} collapsible onSaved={()=>{onRefresh();void api<Chat>(`/demo/conversations/${chat.id}`).then(setChat);}}/>
       </div>
-      <div ref={messages} className="inbox-messages" role="log" aria-label="Mensajes de recepción" tabIndex={0} onScroll={()=>{const log=messages.current;if(log)followLatest.current=log.scrollHeight-log.scrollTop-log.clientHeight<48;}}>{chat.messages.map(m=><div key={m.id} className={`chat-message ${m.role}`}><span className="message-author">{m.role==='patient'?chat.name:m.role==='staff'?'Recepción':'Asistente'}</span><p>{m.text}</p></div>)}</div>
+      <div ref={messages} className="inbox-messages" role="log" aria-label={t("Mensajes de recepción")} tabIndex={0} onScroll={()=>{const log=messages.current;if(log)followLatest.current=log.scrollHeight-log.scrollTop-log.clientHeight<48;}}>{chat.messages.map(m=><div key={m.id} className={`chat-message ${m.role}`}><span className="message-author">{m.role==='patient'?chat.name:m.role==='staff'?t("Recepción"):t("Asistente")}</span><p>{m.text}</p></div>)}</div>
       <form className="staff-reply" onSubmit={e=>{e.preventDefault();void reply();}}>
-        <div className="composer-heading"><label htmlFor="staff-message">Responder como recepción</label><span>Al responder, el asistente se pausa.</span></div>
-        <textarea ref={textarea} id="staff-message" placeholder="Escribí tu respuesta…" value={text} rows={1} maxLength={500} onFocus={()=>{if(selected!==chat.id)onSelect(chat.id);}} onChange={e=>{setText(e.target.value);drafts.current.set(chat.id,e.target.value);}}/>
-        {error&&<p className="error-message" role="alert">{error}</p>}
+        <div className="composer-heading"><label htmlFor="staff-message">{t("Responder como recepción")}</label><span>{t("Al responder, el asistente se pausa.")}</span></div>
+        <textarea ref={textarea} id="staff-message" placeholder={t("Escribí tu respuesta…")} value={text} rows={1} maxLength={500} onFocus={()=>{if(selected!==chat.id)onSelect(chat.id);}} onChange={e=>{setText(e.target.value);drafts.current.set(chat.id,e.target.value);}}/>
+        {error&&<p className="error-message" role="alert">{t(error)}</p>}
         <div className="composer-actions"><span className="composer-counter">{text.length} / 500</span><div className="composer-buttons">
-          {chat.status!=='active'&&<button type="button" className="secondary-button" disabled={busy} onClick={()=>void resolve()}><CheckCheck size={15}/>Resolver caso</button>}
-          <button className="primary-button" disabled={busy||!text.trim()} type="submit">Enviar<ArrowUp size={15}/></button>
+          {chat.status!=='active'&&<button type="button" className="secondary-button" disabled={busy} onClick={()=>void resolve()}><CheckCheck size={15}/>{t("Resolver caso")}</button>}
+          <button className="primary-button" disabled={busy||!text.trim()} type="submit">{t("Enviar")}<ArrowUp size={15}/></button>
         </div></div>
       </form>
-    </>:current&&!error?<LoadingPlaceholder variant="conversation" label="Cargando conversación"/>:<div className="empty-detail"><MessageSquare size={36}/><h2>Elegí una conversación</h2><p>El historial y las respuestas van a aparecer acá.</p>{error&&<p className="error-message" role="alert">{error}</p>}<span><Sparkles size={15}/>Tu equipo y el asistente, en un solo lugar.</span></div>}</div>
+    </>:current&&!error?<LoadingPlaceholder variant="conversation" label={t("Cargando conversación")}/>:<div className="empty-detail"><MessageSquare size={36}/><h2>{t("Elegí una conversación")}</h2><p>{t("El historial y las respuestas van a aparecer acá.")}</p>{error&&<p className="error-message" role="alert">{t(error)}</p>}<span><Sparkles size={15}/>{t("Tu equipo y el asistente, en un solo lugar.")}</span></div>}</div>
   </section>;
 }

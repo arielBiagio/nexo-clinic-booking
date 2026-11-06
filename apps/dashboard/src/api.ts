@@ -1,3 +1,4 @@
+import { t, getLocale } from './i18n.js';
 import { Temporal } from '@js-temporal/polyfill';
 
 const errors:Record<string,string> = {
@@ -38,7 +39,7 @@ export async function api<T>(path:string, body?:unknown, method?:string, headers
   try {
     response = await fetch(`/v1${path}`,{method:method ?? (body !== undefined ? 'POST':'GET'),credentials:'same-origin',
       headers:{...(body !== undefined ? {'Content-Type':'application/json'} : {}),...headers},...(body !== undefined ? {body:JSON.stringify(body)} : {}),signal:AbortSignal.timeout(20_000)});
-  } catch { throw new Error('No pudimos conectar con la demo. Comprobá que el servidor esté encendido.'); }
+  } catch { throw new Error(t("No pudimos conectar con la demo. Comprobá que el servidor esté encendido.")); }
   const value = await response.json();
   if (!response.ok) {
     if(!path.startsWith('/auth/')&&(response.status===401||value.error==='STAFF_ACCESS_REQUIRED'))window.dispatchEvent(new Event('nexo-auth-required'));
@@ -51,8 +52,8 @@ export const addDays = (date:string,days:number) => Temporal.PlainDate.from(date
 export const weekAt = (instant:string,zone:string) => {const date=Temporal.Instant.from(instant).toZonedDateTimeISO(zone).toPlainDate();return date.subtract({days:date.dayOfWeek-1}).toString();};
 export const dayInstant = (date:string,zone:string) => Temporal.PlainDate.from(date).toZonedDateTime(zone).toInstant().toString();
 export const minutesAt = (instant:string,zone:string) => { const value=Temporal.Instant.from(instant).toZonedDateTimeISO(zone);return value.hour*60+value.minute; };
-export const fmtTime = (instant:string,zone:string) => new Intl.DateTimeFormat('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:zone,hourCycle:'h23'}).format(new Date(instant));
-export const fmtDate = (date:string,options:Intl.DateTimeFormatOptions={day:'numeric',month:'long'}) => new Intl.DateTimeFormat('es-AR',{...options,timeZone:'UTC'}).format(new Date(`${date}T12:00:00Z`));
+export const fmtTime = (instant:string,zone:string) => new Intl.DateTimeFormat(getLocale(),{hour:'2-digit',minute:'2-digit',timeZone:zone,hourCycle:'h23'}).format(new Date(instant));
+export const fmtDate = (date:string,options:Intl.DateTimeFormatOptions={day:'numeric',month:'long'}) => new Intl.DateTimeFormat(getLocale(),{...options,timeZone:'UTC'}).format(new Date(`${date}T12:00:00Z`));
 export const initials = (name:string) => name.split(' ').slice(0,2).map(item=>item[0]).join('').toUpperCase();
 export const minuteTime = (minute:number) => `${String(Math.floor(minute/60)).padStart(2,'0')}:${String(minute%60).padStart(2,'0')}`;
 export const timeMinute = (time:string) => Number(time.split(':')[0])*60+Number(time.split(':')[1]);

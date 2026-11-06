@@ -1,3 +1,4 @@
+import { t, useLanguage } from './i18n';
 import type { CSSProperties } from 'react';
 
 type Variant='dashboard'|'chat'|'conversation'|'inbox'|'form'|'details'|'list'|'slots'|'auth'|'schedule';
@@ -17,7 +18,8 @@ function CalendarShape(){
   return <div className="placeholder-panel placeholder-calendar"><div className="placeholder-heading"><Block width="35%" height={16}/><Block width={95} height={28}/></div><div className="placeholder-calendar-grid">{[0,1,2,3,4].map(index=><div key={index}><Block width="60%" height={12}/><span className={`placeholder-calendar-event event-${index%3}`}><Block height={38}/></span></div>)}</div></div>;
 }
 
-export function LoadingPlaceholder({variant='list',label='Cargando datos',count=3}:{variant?:Variant;label?:string;count?:number}){
+export function LoadingPlaceholder({variant='list',label=t("Cargando datos"),count=3}:{variant?:Variant;label?:string;count?:number}){
+  useLanguage();
   let content;
   if(variant==='dashboard')content=<><div className="placeholder-stats">{[0,1,2,3].map(index=><div className="placeholder-panel" key={index}><Block width="64%" height={13}/><Block width="30%" height={27}/></div>)}</div><div className="placeholder-heading"><Block width="23%" height={17}/><Block width="24%" height={36}/></div><div className="placeholder-agenda-layout"><CalendarShape/><div className="placeholder-panel"><Block width="70%" height={16}/><List count={3}/></div></div></>;
   else if(variant==='inbox')content=<div className="placeholder-panel placeholder-inbox"><div className="placeholder-inbox-list"><Block width="70%" height={16}/><List count={4}/></div><Chat full/></div>;

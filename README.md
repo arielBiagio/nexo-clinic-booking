@@ -1,41 +1,45 @@
-# Nexo
+<div align="center">
+  <img src="assets/nexo-wordmark.svg" alt="Nexo" width="180" />
+  <h1>Nexo — Clinic Booking Assistant</h1>
+  <p>A shared workspace for physical therapy clinics.<br />Natural-language booking, coordinated schedules and connected calendars.</p>
+  <p>
+    <a href="https://www.tella.tv/video/vid_cmw5how9u000008jmct6rcsgl/view"><strong>Watch the demo ↗</strong></a>
+    &nbsp;·&nbsp; English & Spanish interface
+  </p>
+  <p>
+    <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" />
+    <img alt="React" src="https://img.shields.io/badge/React-161D22?style=flat-square&logo=react&logoColor=61DAFB" />
+    <img alt="Node.js" src="https://img.shields.io/badge/Node.js-417E38?style=flat-square&logo=nodedotjs&logoColor=white" />
+    <img alt="Supabase" src="https://img.shields.io/badge/Supabase-161D22?style=flat-square&logo=supabase&logoColor=3FCF8E" />
+  </p>
+</div>
 
-## Funciones
+<a href="https://www.tella.tv/video/vid_cmw5how9u000008jmct6rcsgl/view">
+  <img src="assets/nexo-dashboard-en.jpg" alt="Nexo’s English dashboard in Obsidian dark mode, showing a weekly calendar, therapist filters and upcoming appointments with sample patient data." width="100%" />
+</a>
 
-- Login del personal con roles de administración, recepción y terapeuta.
-- Alta de terapeutas con su perfil profesional, gestión de roles y desactivación de accesos.
-- Terapeutas: edición de su perfil y disponibilidad, creación y cancelación de reservas de su propia agenda.
-- Agenda semanal y diaria con filtros, búsqueda flexible por nombres y reservas manuales sobre fichas existentes.
-- Asistente de reservas con lenguaje natural, consulta de disponibilidad, preferencias de primera/última hora y explicaciones con IA.
-- Selección de horarios y confirmación de reservas controladas por el backend.
-- Ficha del paciente con nombre, teléfono, seguro y resumen de información referida.
-- Bandeja de conversaciones, atención humana y reanudación del asistente.
-- Historial de mensajes y contexto de reservas persistentes, con protección contra mensajes duplicados.
-- Reservas por Telegram en chats privados de prueba, con botones y respuestas de recepción.
-- Comando /nuevo_paciente para iniciar pruebas con fichas independientes desde una cuenta de Telegram autorizada.
-- Reprogramación por chat o desde la agenda, conservando la reserva y los datos del paciente.
-- Cancelación por chat con elección del turno y confirmación explícita.
-- Reservas de una semana al mismo horario, con revisión de cada fecha, contacto y confirmación del conjunto.
-- Cancelación conjunta de los turnos futuros de una semana, con revisión y confirmación.
-- Google Calendar por terapeuta: conexión OAuth y copia de turnos, cambios y cancelaciones en un calendario propio.
-- Datos de la ficha en Google Calendar y recordatorios 30 minutos antes.
-- Avisos de nuevas reservas por Gmail, desde y hacia la cuenta autorizada del terapeuta, con cola persistente.
-- Avisos por conversación con atención humana pendiente y campana con actividad de turnos.
-- Ajustes personales de notificaciones del navegador y sonidos, con acceso para cerrar sesión.
-- Modo claro y oscuro Obsidiana, con preferencia guardada.
-- Animaciones breves de navegación y entradas escalonadas, con movimiento reducido según el sistema.
-- Accesos rápidos para crear turnos o administrar accesos del equipo.
-- Configuración de jornadas, descansos, duración de sesiones y ausencias.
-- Cancelación y restauración de turnos; archivo y recuperación de conversaciones.
-- Fichas y reservas compartidas en Supabase, con protección contra turnos superpuestos; modo local opcional.
+<p align="center"><sub>English dashboard · Sample data · The video walkthrough is in Spanish.</sub></p>
 
-## Tecnologías
+## Features
 
-- TypeScript y Node.js.
-- React, Vite y Lucide.
-- Fastify y Zod.
-- Supabase Auth, PostgreSQL, PGlite y migraciones SQL.
-- OpenRouter con GPT-6 Luna.
-- Telegram Bot API mediante long polling y cola persistente de envíos.
-- Google Calendar API, Gmail API y OAuth 2.0, con sincronización y avisos persistentes en segundo plano.
-- Temporal para fechas, horarios y zonas horarias.
+- **Book through Telegram.** Patients request appointments in natural language, choose a therapist or time window, and confirm using guided buttons. The assistant can book a full week, reschedule or cancel appointments.
+- **Manage a shared calendar.** Weekly and daily views, flexible patient and therapist search, manual bookings, rescheduling, cancellations and recovery of removed appointments.
+- **Keep patient details together.** Shared records with required name and phone, plus optional insurance, patient-reported diagnosis and additional notes.
+- **Bring a person into the conversation.** A reception inbox with persistent chat history, human handoff, staff replies and the option to resume the assistant.
+- **Give therapists their own workspace.** Role-based access for administrators, reception and therapists; professional profiles, working hours, breaks, session duration and time off.
+- **Connect Google Calendar and Gmail.** Each therapist connects their own account. Nexo syncs appointments, changes and cancellations, sets a 30-minute reminder and emails new booking notifications.
+- **Stay informed.** Appointment activity feed, browser notifications, sound preferences and quick actions.
+- **Choose your interface.** English or Spanish, light or Obsidian dark mode, responsive layouts and reduced-motion support.
+
+## Tech stack
+
+| Layer | Technologies |
+| :--- | :--- |
+| Frontend | React, TypeScript, Vite, Lucide |
+| Backend | Node.js, Fastify, Zod |
+| Data & authentication | Supabase Auth, PostgreSQL, SQL migrations; optional local PGlite storage |
+| AI | OpenRouter, GPT-6 Luna; backend-controlled availability and booking |
+| Messaging | Telegram Bot API, long polling, persistent delivery queue |
+| Integrations | Google Calendar API, Gmail API, OAuth 2.0 |
+| Dates & time zones | Temporal |
+| Quality | Vitest, TypeScript checks, GitHub Actions |

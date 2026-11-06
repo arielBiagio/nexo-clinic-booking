@@ -1,3 +1,4 @@
+import { t } from './i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 type Preferences={notifications:boolean;sound:boolean};
@@ -50,21 +51,21 @@ export function useNotifications(userId:string){
   },[]);
   const setSound=async(enabled:boolean)=>{
     setError('');
-    if(enabled&&!await unlock()){setError('El navegador no permitió el sonido. Volvé a activar la opción de sonido.');return;}
+    if(enabled&&!await unlock()){setError(t("El navegador no permitió el sonido. Volvé a activar la opción de sonido."));return;}
     setPreferences(value=>({...value,sound:enabled}));if(enabled)chime(true);
   };
   const setNotifications=async(enabled:boolean)=>{
     setError('');
     if(!enabled){setPreferences(value=>({...value,notifications:false}));return;}
     let allowed=permissionNow();
-    try{if(allowed==='default')allowed=await Notification.requestPermission();}catch{setError('No pudimos solicitar el permiso de notificaciones.');return;}
+    try{if(allowed==='default')allowed=await Notification.requestPermission();}catch{setError(t("No pudimos solicitar el permiso de notificaciones."));return;}
     setPermission(allowed);setPreferences(value=>({...value,notifications:allowed==='granted'}));
   };
   const announce=useCallback((kind:'activity'|'attention')=>{
     chime();
     if(current.current.notifications&&document.hidden&&permissionNow()==='granted')try{
-      new Notification(kind==='activity'?'Nexo · Actividad de turnos':'Nexo · Atención pendiente',{
-        body:kind==='activity'?'Hay movimientos nuevos en la agenda.':'Hay conversaciones por atender en recepción.',tag:`nexo-${kind}`,silent:true,
+      new Notification(kind==='activity'?t("Nexo · Actividad de turnos"):t("Nexo · Atención pendiente"),{
+        body:kind==='activity'?t("Hay movimientos nuevos en la agenda."):t("Hay conversaciones por atender en recepción."),tag:`nexo-${kind}`,silent:true,
       });
     }catch{/* The bell and conversation badge remain available. */}
   },[chime]);
