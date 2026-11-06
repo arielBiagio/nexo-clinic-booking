@@ -15,7 +15,8 @@ export const availabilityInput = z.strictObject({
   // Backend-derived ordering, not a clock time guessed by the model.
   time_preference:z.enum(['earliest','latest']).nullable().optional(),
 });
-export type AvailabilityInput = z.infer<typeof availabilityInput>;
+// Exclusions are resolved from patient text by the backend, never supplied by a model tool.
+export type AvailabilityInput = z.infer<typeof availabilityInput> & {excluded_therapist_ids?:string[]};
 const patientInput=z.strictObject({name:z.string().min(2).max(70).nullable(),phone:z.string().max(40).nullable(),insurance:z.string().max(120).nullable(),reported_reason:z.string().max(400).nullable(),additional_info:z.string().max(600).nullable()});
 export type AgentDecision =
   | {kind:'availability';filter:AvailabilityInput}

@@ -12,8 +12,8 @@ export function narrationPrompt(context:NarrationContext):string {
   const rules:Record<NarrationContext['event'],string>={
     availability:'Introduce the appointment buttons, without listing them. Honor day/window/therapist. exact_time_status=unavailable: explicitly acknowledge no availability at {requested_time}, then offer alternatives in the checked scope; never infer occupied/taken. unknown or search_complete=false: absence proves nothing. No results: explain the searched scope and suggest changing preferences. Never claim a booking.',
     selected:'Selection only, not booked. Backend appends exact details and asks for confirmation/missing contact; write a brief introduction, without repeating its question.',
-    booked:'Booking succeeded: say it is confirmed. Backend appends exact details. No notifications were sent; promise none.',
-    rescheduled:'Rescheduling succeeded: say the appointment was moved and its previous time was released. Backend appends exact details. Promise no notifications.',
+    booked:'Booking succeeded: say it is confirmed. Backend appends exact details. Notification delivery is not verified; do not mention notifications.',
+    rescheduled:'Rescheduling succeeded: say the appointment was moved and its previous time was released. Backend appends exact details. Notification delivery is not verified; do not mention notifications.',
     patient_updated:'Only saved_fields were saved. Briefly acknowledge this. Backend appends any missing-contact question or appointment details; do not repeat them.',
     handoff:'Reception handoff succeeded. Say the team can continue here; promise no response time.',
     action_failed:'The action failed. Briefly explain the verified limitation; never promise success.',

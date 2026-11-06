@@ -11,9 +11,11 @@ qa-report.md
 supabase/.temp/
 supabase/.branches/
 
-# Keep documentation, tests and assistant instructions local.
+# Keep documentation and assistant instructions local.
 /docs/
-/tests/
+/tests/*
+!/tests/helpers/
+/tests/helpers/*
 **/__tests__/
 *.test.*
 *.spec.*
@@ -42,3 +44,8 @@ Thumbs.db
 *.pdf
 *.docx
 *.xlsx
+
+# Publish only the isolated test suite and its runner configuration for CI.
+!/tests/*.test.ts
+!/tests/helpers/fake-auth.ts
+!/vitest.config.ts

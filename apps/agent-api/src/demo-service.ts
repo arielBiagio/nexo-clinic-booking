@@ -290,7 +290,6 @@ export class DemoService {
       const session = this.sessions.get(id);
       if (!session) throw new DomainError('DEMO_SESSION_NOT_FOUND', 404);
       if (session.processed.has(input.messageId)) return this.get(id);
-      if (session.messages.length > 120) throw new DomainError('DEMO_LIMIT_REACHED', 409);
       let action = input.action ?? (/recepci[oó]n|humano|persona|ayuda|factura|dolor|m[eé]dic/i.test(input.text ?? '') ? 'human' : 'start');
       const text = input.text ?? ({ start: 'Quiero reservar un turno',more:'Buscar en los próximos días', select: 'Ese horario me sirve', confirm: 'Sí, confirmo el turno', human: 'Quiero hablar con recepción',reschedule:'Quiero cambiar ese turno',cancel:'Quiero cancelar ese turno',cancel_week:'Quiero revisar la cancelación de los turnos de esa semana',confirm_cancel:'Sí, confirmo la cancelación',keep:'Mantener mis turnos',confirm_week:'Sí, confirmo los turnos de la semana',discard_week:'Descartar la propuesta semanal' }[action]);
       // Only this conversation's persisted transcript is supplied to the model.
@@ -388,7 +387,7 @@ export class DemoService {
             }
             const decision=directSearch?{kind:'availability' as const,filter:directSearch}:await this.intentModel.decide({now:localNow,timeZone:clinic.time_zone,clinicName:clinic.name,therapists,
               patient:{name:current.patient.name_collected?current.patient.name:null,phone:current.patient.phone,insurance:current.patient.insurance,summary:current.patient.intake_summary,missing:missingContact(current.patient)},hasAppointment:current.hasAppointment,appointments:current.appointments,rescheduling:session.rescheduling,search:session.search,weeklyRequest:session.weekly?.request??null,
-              offered:session.offered,selectedSlotId:session.selected,history:session.messages.map(m=>({role:m.role,text:m.text}))});
+              offered:session.offered,selectedSlotId:session.selected,history:session.messages.slice(-24).map(m=>({role:m.role,text:m.text}))});
             session.providerError=null;
             if((await this.get(id)).status!=='active'){session.processed.add(input.messageId);return this.get(id);}
             if(decision.kind==='weekly'){
@@ -522,10 +521,10 @@ export class DemoService {
           if(booked.status!=='confirmed')throw new Error('Unexpected booking status');
           if(selected){
             const when=new Intl.DateTimeFormat('es-AR',{timeZone:clinic.time_zone,weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(selected.start));
-            verifiedSuffix=`${when} · ${selected.therapistName}. En esta demo no enviamos correos.`;
-          }else verifiedSuffix='En esta demo no enviamos correos.';
-          this.add(session, 'assistant', moving?`Tu turno quedó reprogramado. El horario anterior está libre. ${verifiedSuffix}`:'¡Listo! Tu turno quedó confirmado y ya aparece en la agenda de la clínica. En esta demo no enviamos correos.');
-          narration={event:moving?'rescheduled':'booked',request:text,facts:{booking_succeeded:true,notifications_sent:false,details_appended_by_backend:true},variables:{}};
+            verifiedSuffix=`${when} · ${selected.therapistName}.`;
+          }
+          this.add(session, 'assistant', moving?`Tu turno quedó reprogramado. El horario anterior está libre. ${verifiedSuffix}`:`¡Listo! Tu turno quedó confirmado y ya aparece en la agenda de la clínica. ${verifiedSuffix}`.trim());
+          narration={event:moving?'rescheduled':'booked',request:text,facts:{booking_succeeded:true,notifications_sent:null,details_appended_by_backend:true},variables:{}};
           session.rescheduling=null;
           session.selected = null;
           session.choices = [{ label: 'Hablar con recepción', action: 'human' }];
@@ -537,7 +536,7 @@ export class DemoService {
             const original=current.appointments.find(a=>a.id===session.rescheduling!.id);
             const therapists=await this.repository.getTherapists();
             const named=input.text&&therapists.some(t=>input.text!.toLowerCase().includes(String(t.name).toLowerCase().split(' ')[0]!));
-            if(original&&!filter?.therapist_id&&!named&&!/cualquier|cualquiera|sin preferencia|me da igual/i.test(input.text??''))filter={...(filter??session.search??{therapist_id:null,date:null,not_before:null,not_after:null,horizon_days:14}),therapist_id:original.therapistId};
+            if(original&&!filter?.therapist_id&&!filter?.excluded_therapist_ids?.includes(original.therapistId)&&!named&&!/cualquier|cualquiera|sin preferencia|me da igual/i.test(input.text??''))filter={...(filter??session.search??{therapist_id:null,date:null,not_before:null,not_after:null,horizon_days:14}),therapist_id:original.therapistId};
           }
           const today=Temporal.Now.plainDateISO(clinic.time_zone);
           const fromDate=filter?.date?Temporal.PlainDate.from(filter.date):today;
@@ -552,6 +551,7 @@ export class DemoService {
           const minute=(time:string)=>Number(time.split(':')[0])*60+Number(time.split(':')[1]);
           for (const therapist of therapists) {
             if(filter?.therapist_id&&therapist.id!==filter.therapist_id)continue;
+            if(filter?.excluded_therapist_ids?.includes(String(therapist.id)))continue;
             const available = await this.repository.getAvailability(String(therapist.id), now, to);
             if(available.length>=500)complete=false;
             const matching=available.filter(slot=>{
@@ -588,7 +588,7 @@ export class DemoService {
           narration={event:'availability',request:text,facts:{time_zone:clinic.time_zone,search_complete:complete,
             exact_time_status:exactStatus,offered_count:session.offered.length,matching_count:candidates.length,
             alternatives_to_exact_time:Boolean(exactTime&&!exact.length&&session.offered.length),
-            therapist_scope:preferred?'specified therapist only':'all therapists',
+            therapist_scope:preferred?'specified therapist only':filter?.excluded_therapist_ids?.length?'all therapists except patient exclusions':'all therapists',
             time_preference:filter?.time_preference??null,
             period_start:fromDate.toString(),period_days:filter?.horizon_days??14,
             window_start:filter?.not_before??null,window_end:filter?.not_after??null,
@@ -650,7 +650,7 @@ export class DemoService {
       this.repository.getTherapists(),
     ]);
     const clinic = clinicResult.rows[0]!;
-    let anchor = Temporal.Now.plainDateISO(String(clinic.time_zone)).add({ days: 1 });
+    let anchor = Temporal.Now.plainDateISO(String(clinic.time_zone));
     while (anchor.dayOfWeek > 5) anchor = anchor.add({ days: 1 });
     const start = fromDate ? Temporal.PlainDate.from(fromDate) : anchor.subtract({ days: anchor.dayOfWeek - 1 });
     const from = start.toZonedDateTime(String(clinic.time_zone)).toInstant().toString();

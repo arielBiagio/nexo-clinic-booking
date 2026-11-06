@@ -1,5 +1,5 @@
 import { createHash,randomUUID,timingSafeEqual } from 'node:crypto';
-import { DomainError,ClinicRepository } from '../../../packages/db/src/repository.js';
+import { ClinicRepository } from '../../../packages/db/src/repository.js';
 import { withSavepoints } from '../../../packages/db/src/savepoints.js';
 import type { Sql } from '../../../packages/db/src/client.js';
 import { TelegramApi,TelegramError,telegramUpdate,type TelegramUpdate } from '../../../packages/channels/src/telegram.js';
@@ -110,11 +110,7 @@ export class TelegramService {
     }else if(!text||text.length>500){
       await this.notice(db,peer.conversation_id,'Por ahora puedo leer mensajes de texto de hasta 500 caracteres. Escribí qué día o franja horaria te conviene.');return empty;
     }else input={messageId,text};
-    try{await service.send(peer.conversation_id,input);}
-    catch(error){
-      if(error instanceof DomainError&&error.code==='DEMO_LIMIT_REACHED')await this.notice(db,peer.conversation_id,'Esta conversación de prueba alcanzó su límite. Contactá con recepción para continuar.');
-      else throw error;
-    }
+    await service.send(peer.conversation_id,input);
     return empty;
   }
 

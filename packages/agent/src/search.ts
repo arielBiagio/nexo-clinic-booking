@@ -77,13 +77,18 @@ const namesIn=(value:string,therapists:Therapist[])=>{
   const best=Math.max(0,...scores.map(match=>match.score));
   return scores.filter(match=>match.score>0&&match.score===best).map(match=>match.therapist);
 };
+const excludedNamesIn=(value:string,therapists:Therapist[])=>{
+  const clauses=[...value.matchAll(/\b(?:no\s+(?:(?:quiero|deseo|prefiero)\s+(?:(?:un|el)\s+turno\s+)?)?con|excepto(?:\s+con)?|menos(?:\s+con)?)\s+([^,;.!?]+)/g)];
+  return [...new Set(clauses.flatMap(match=>namesIn(match[1]!.split(/\b(?:pero|y con)\b/)[0]!,therapists).map(t=>t.id)))];
+};
 /** Route clear read-only searches separately from intake, consent and handoffs. */
 export function isAvailabilityRequest(text:string,therapists:Therapist[],previous?:AvailabilityInput|null) {
   const value=normalized(text).trim().replace(/^[¿¡]+/,'');
-  if(/^(?:no\b)|\b(recepcion|humano|persona|cancelar|cancela|anular|reprogramar|cambiar|mover|confirmar|confirmo|ese|ese horario|primero|segundo|tratamiento|ejercicios?|diagnostico|dolor|urgencia|factura|seguro|obra social|telefono|numero|me llamo|mi nombre|soy)\b/.test(value))return false;
+  if(/^no\b/.test(value)&&!excludedNamesIn(value,therapists).length||/\b(recepcion|humano|persona|cancelar|cancela|anular|reprogramar|cambiar|mover|confirmar|confirmo|ese|ese horario|primero|segundo|tratamiento|ejercicios?|diagnostico|dolor|urgencia|factura|seguro|obra social|telefono|numero|me llamo|mi nombre|soy)\b/.test(value))return false;
   if(/\bcon\b/.test(value)&&!namesIn(value,therapists).length&&!therapists.some(t=>value.includes(normalized(t.specialty)))&&!anyTherapist.test(value)&&!/\bcon (?:quien sea|disponibilidad)\b/.test(value))return false;
+  if(previous&&excludedNamesIn(value,therapists).length)return true;
   if(previous&&namesIn(value,therapists).length===1&&/^(?:(?:y|mejor|prefiero|preferiria|solo|solamente)\s+)*(?:con)\s+/.test(value))return true;
-  if(/^(?:(?:un|una|algun|alguna)\s+)?(?:turno|cita)\s+(?:para|con|el|la|por|en|a|hoy|manana)\b/.test(value))return true;
+  if(/^(?:(?:un|una|algun|alguna)\s+)?(?:turno|cita)\s+(?:para|con|excepto|menos|el|la|por|en|a|hoy|manana)\b/.test(value))return true;
   return /\b(turnos?|citas?|horarios?|disponibilidad|disponibles?|fisio|fisioterapia|kinesiologia|terapia fisica)\b/.test(value)&&/\b(quiero|quisiera|necesito|busco|buscar|ver|tenes|tienen|tendra|hay|disponibles?|disponibilidad|podrias|puedo|gustaria|sacar|reservar)\b/.test(value)
     || /^(?:y|o|mejor|solo)\b.*\b(?:la tarde|la manana|la noche)\b/.test(value)
     || Boolean(previous&&(refinement(value)||requestedTimePreference(value))&&! /\b(el de|la de|primero|segundo|tercero|ultimo|ese|este|sirve|elijo|confirmo)\b/.test(value));
@@ -93,17 +98,22 @@ export function isAvailabilityRequest(text:string,therapists:Therapist[],previou
 export function normalizeAvailabilitySearch(filter:AvailabilityInput,text:string,now:string,timeZone:string,therapists:Therapist[],previous?:AvailabilityInput|null):AvailabilityInput {
   const value=normalized(text),today=Temporal.Instant.from(now).toZonedDateTimeISO(timeZone).toPlainDate();
   const preference=requestedTimePreference(text);
+  const excluded=excludedNamesIn(value,therapists);
   const namedFollowup=namesIn(value,therapists).length===1&&!freshSearch.test(value)&&/^(?:(?:y|mejor|prefiero|preferiria|solo|solamente)\s+)*con\s+/.test(value.trim().replace(/^[¿¡]/,''));
-  const followup=(/^(?:y|o|mejor|solo|solamente)\b/.test(value.trim().replace(/^[¿¡]/,''))||refinement(value)||namedFollowup||Boolean(preference&&!freshSearch.test(value)))&&previous;
+  const followup=(/^(?:y|o|mejor|solo|solamente)\b/.test(value.trim().replace(/^[¿¡]/,''))||refinement(value)||namedFollowup||Boolean((preference||excluded.length)&&!freshSearch.test(value)))&&previous;
   let result:AvailabilityInput={...filter};
   result.time_preference=preference??(followup?previous.time_preference??null:null);
   if(/\b(cualquier horario|a cualquier hora|sin preferencia de horari[oa])\b/.test(value))result.time_preference=null;
-  const names=namesIn(value,therapists);
+  const names=namesIn(value,therapists).filter(t=>!excluded.includes(t.id));
+  const exclusions=excluded.length?excluded:followup&&!names.length&&!anyTherapist.test(value)?previous.excluded_therapist_ids??[]:[];
+  delete result.excluded_therapist_ids;
+  if(exclusions.length)result.excluded_therapist_ids=exclusions;
   if(anyTherapist.test(value))result.therapist_id=null;
   else if(names.length===1)result.therapist_id=names[0]!.id;
   else if(names.length>1)result.therapist_id=null;
   else if(followup)result.therapist_id=previous.therapist_id;
   else result.therapist_id=null;
+  if(result.therapist_id&&exclusions.includes(result.therapist_id))result.therapist_id=null;
 
   const pinned=requestedLocalDate(text,now,timeZone);
   const dateText=value.replace(/\b(?:por|a|en|durante|para) la manana\b|\b(?:por|a|en|durante|para) las mananas\b|\bhorario (?:de manana|matutino)\b/g,'');
@@ -132,7 +142,8 @@ export function normalizeAvailabilitySearch(filter:AvailabilityInput,text:string
 /** Safe read-only fallback when the interpreter is limited; unsupported constraints stay explicit. */
 export function simpleAvailabilitySearch(text:string,now:string,timeZone:string,therapists:Therapist[],previous?:AvailabilityInput|null):AvailabilityInput|null {
   const value=normalized(text);
-  if(!isAvailabilityRequest(text,therapists,previous)||namesIn(value,therapists).length>1)return null;
+  const excluded=excludedNamesIn(value,therapists);
+  if(!isAvailabilityRequest(text,therapists,previous)||namesIn(value,therapists).filter(t=>!excluded.includes(t.id)).length>1)return null;
   if(/\b(antes|despues|entre|desde|hasta|a partir|cada|todos|todas|toda|quincena|mes que viene|proximo mes)\b/.test(value))return null;
   if(/\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b|\bdentro de\b|\ben\s+\d+\s+(?:dias?|semanas?|meses?)\b|\b(?:el|dia)\s+\d{1,2}\b/.test(value))return null;
   if(/\b\d{1,2}\/\d{1,2}\b|\b\d{1,2}\s+de\s+\w+|\b(?:en|dentro de)\s+(?:\d+|un|dos|tres|cuatro|cinco|seis|siete)\s+dias?\b/.test(value))return null;

@@ -57,7 +57,7 @@ export function Booking({data,initialDate,initialTherapist,initialSlot,ownTherap
     <div className="slot-picker">{loading?<LoadingPlaceholder variant="slots" count={6} label="Buscando horarios"/>:slots.length?slots.map(slot=><button key={slot.id} type="button" className={selected?.id===slot.id?'selected':''} onClick={()=>setSelected(slot)}>{fmtTime(slot.starts_at,zone)}{selected?.id===slot.id&&<Check size={13}/>}</button>):<p className="no-slots">No hay horarios disponibles ese día. Probá con otra fecha o profesional.</p>}</div>
     {selected&&<div className="booking-summary"><CalendarDays size={21}/><div><strong>{fmtDate(date,{weekday:'long',day:'numeric',month:'long'})}, {fmtTime(selected.starts_at,zone)}</strong><span>{data.therapists.find(t=>t.id===therapist)?.name} · {Math.round((Date.parse(selected.ends_at)-Date.parse(selected.starts_at))/60_000)} minutos</span></div></div>}
     {error&&<p className="error-message" role="alert">{error}</p>}
-    <p className="privacy-note"><ShieldCheck size={14}/>{editing?'Si el paciente usa Telegram, el cambio quedará pendiente de envío a su chat.':'Usá datos ficticios. No se enviarán emails.'}</p>
+    <p className="privacy-note"><ShieldCheck size={14}/>{editing?'Si el paciente usa Telegram, el cambio quedará pendiente de envío a su chat.':'La reserva puede generar avisos al paciente y al profesional según sus canales conectados.'}</p>
     <button className="primary-button full" disabled={!selected||!editing&&(!name.trim()||!phone.trim())||busy} type="submit">{busy?'Guardando…':<><Check size={17}/>{editing?'Confirmar cambio':'Confirmar reserva'}</>}</button>
   </form>;
 }
